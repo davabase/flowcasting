@@ -1,0 +1,553 @@
+<title>FlowCast Radar Nowcasting</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+/* Layout: one reading column, like a forecast bulletin; radar imagery sits on dark "scope" plates in both themes. */
+:root {
+  --bg: #f3f5f7;
+  --surface: #fbfcfd;
+  --ink: #0e1620;
+  --ink-2: #46525f;
+  --muted: #7a8592;
+  --rule: #dce1e7;
+  --axis: #c3cad3;
+  --plate: #111418;
+  --plate-ink: #e6e9ee;
+  --plate-muted: #8b94a1;
+  --s1: #2a78d6;      /* FlowCastNet */
+  --s2: #eb6834;      /* Optical flow */
+  --s3: #1baf7a;      /* Persistence */
+  --s4: #6250d6;      /* Earthformer (pretrained) */
+  --s5: #e87ba4;      /* Earthformer fine-tuned */
+  --ref: #9aa3ae;     /* published reference models */
+  --focus: #2a78d6;
+  --display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1014; --surface: #151a20; --ink: #e8ecf1; --ink-2: #b3bcc7; --muted: #7d8794;
+    --rule: #252c35; --axis: #36404b; --plate: #0a0c0f; --plate-ink: #e6e9ee; --plate-muted: #8b94a1;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #9085e9; --s5: #d55181; --ref: #6f7883; --focus: #6aa8f0; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1014; --surface: #151a20; --ink: #e8ecf1; --ink-2: #b3bcc7; --muted: #7d8794;
+  --rule: #252c35; --axis: #36404b; --plate: #0a0c0f; --plate-ink: #e6e9ee; --plate-muted: #8b94a1;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #9085e9; --s5: #d55181; --ref: #6f7883; --focus: #6aa8f0; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 16px; line-height: 1.6; }
+.wrap { max-width: 1080px; margin: 0 auto; padding-block: 40px 72px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 56px; }
+h1, h2, h3 { font-family: var(--display); font-weight: 600; letter-spacing: 0.01em; line-height: 1.05; margin: 0; text-wrap: balance; }
+h1 { font-size: clamp(56px, 11vw, 112px); font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: clamp(30px, 4.6vw, 42px); }
+h3 { font-size: 22px; }
+p { margin: 0; max-width: 68ch; }
+a { color: var(--s1); }
+code, .mono { font-family: var(--mono); font-size: 0.88em; }
+.eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.section { display: grid; gap: 20px; min-width: 0; align-content: start; }
+.section > header { display: grid; gap: 10px; }
+.lede { font-size: 19px; color: var(--ink-2); max-width: 62ch; }
+.note { font-size: 14px; color: var(--muted); }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* Hero */
+.hero { display: grid; gap: 18px; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1px; background: var(--rule);
+  border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; margin-top: 8px; }
+.facts div { background: var(--surface); padding: 12px 14px; display: grid; gap: 2px; min-width: 0; }
+.facts dt { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.facts dd { margin: 0; font-family: var(--display); font-size: 24px; font-weight: 600; line-height: 1.15; }
+.facts dd small { display: block; font-family: var(--body); font-size: 13px; font-weight: 400; color: var(--ink-2); }
+
+/* Radar plate */
+.plate { background: var(--plate); color: var(--plate-ink); border-radius: 8px; padding: 18px; display: grid; gap: 14px; min-width: 0; }
+.plate img { display: block; width: 100%; height: auto; border-radius: 3px; image-rendering: auto; }
+.plate .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.plate .caption { font-size: 13.5px; color: var(--plate-muted); max-width: none; }
+.plate .caption strong { color: var(--plate-ink); font-weight: 500; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font: 500 13px/1 var(--mono); padding: 8px 11px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--rule); background: var(--surface); color: var(--ink-2); }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.plate .chip { background: transparent; border-color: #2c333d; color: var(--plate-muted); }
+.plate .chip[aria-pressed="true"] { background: var(--plate-ink); color: var(--plate); border-color: var(--plate-ink); }
+
+/* VIL scale */
+.vil { display: grid; gap: 6px; }
+.vil-strip { display: grid; grid-template-columns: repeat(256, 1fr); height: 14px; border-radius: 2px; overflow: hidden; }
+.vil-ticks { position: relative; height: 30px; font: 11px/1.2 var(--mono); color: var(--plate-muted); }
+.vil-ticks span { position: absolute; transform: translateX(-50%); white-space: nowrap; top: 0; }
+.vil-ticks span::before { content: ""; display: block; width: 1px; height: 6px; background: var(--plate-muted); margin: 0 auto 2px; }
+
+/* Charts */
+.card { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 18px; display: grid; gap: 12px; min-width: 0; }
+.card-head { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: baseline; justify-content: space-between; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.legend i { width: 16px; height: 3px; border-radius: 2px; display: inline-block; }
+.chart { position: relative; width: 100%; min-height: 260px; }
+.chart svg { display: block; width: 100%; overflow: visible; }
+.chart text { font-family: var(--mono); font-size: 11px; fill: var(--muted); }
+.chart .lbl { fill: var(--ink-2); font-size: 12px; }
+.chart .val { fill: var(--ink); font-size: 12px; font-weight: 500; }
+.tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px;
+  padding: 8px 10px; font: 12px/1.5 var(--mono); color: var(--ink); box-shadow: 0 4px 16px rgb(0 0 0 / 0.12); white-space: nowrap; z-index: 2; }
+.tip b { font-weight: 500; color: var(--ink-2); display: block; margin-bottom: 2px; }
+.tip i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: 16px; }
+
+/* Table */
+.table-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+th, td { padding: 9px 12px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--rule); }
+th:first-child, td:first-child { text-align: left; }
+thead th { font: 500 11px/1.3 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); background: var(--bg); }
+tbody tr:last-child td { border-bottom: 0; }
+td.best { font-weight: 600; }
+tr.group td { font: 500 11px/1.3 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); background: var(--bg); text-align: left; }
+.sw { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 8px; vertical-align: 0; }
+
+/* Model anatomy */
+.flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; counter-reset: stage; }
+.flow div { border: 1px solid var(--rule); border-radius: 6px; padding: 12px; background: var(--surface); display: grid; gap: 4px; align-content: start; }
+.flow div::before { counter-increment: stage; content: counter(stage); font: 500 11px var(--mono); color: var(--muted); }
+.flow strong { font-family: var(--display); font-size: 19px; font-weight: 600; }
+.flow span { font-size: 13.5px; color: var(--ink-2); }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 20px 32px; }
+.two > * { min-width: 0; }
+ul.plain { margin: 0; padding-left: 18px; display: grid; gap: 8px; max-width: 68ch; }
+pre { margin: 0; overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 14px 16px; font: 13px/1.6 var(--mono); color: var(--ink); }
+footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--rule); padding-top: 18px; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+
+<main class="wrap">
+  <header class="hero">
+    <p class="eyebrow">CSCI 596 · Flowcasting · proof of concept</p>
+    <h1>FlowCast</h1>
+    <p class="lede" id="lede"></p>
+    <dl class="facts" id="facts"></dl>
+  </header>
+
+  <section class="section" aria-labelledby="watch">
+    <header>
+      <h2 id="watch">Forecast against ground truth</h2>
+      <p>Four test cases from the summer and autumn of 2019, months the model never saw in training. Each animation plays
+        the 13 observed frames, then the 12 forecast frames side by side with what really happened. The three strongest
+        storms were picked by how much heavy precipitation the radar recorded, not by which method scored best; the
+        fourth is a random moderate case.</p>
+    </header>
+    <div class="plate">
+      <div class="bar">
+        <div class="chips" role="group" aria-label="Test case" id="case-chips"></div>
+        <div class="chips" role="group" aria-label="View">
+          <button class="chip" type="button" id="view-anim" aria-pressed="true">Animation</button>
+          <button class="chip" type="button" id="view-frames" aria-pressed="false">Key frames</button>
+        </div>
+      </div>
+      <img id="case-img" alt="">
+      <p class="caption" id="case-caption"></p>
+      <div class="vil" aria-label="VIL colour scale">
+        <div class="vil-strip" id="vil-strip"></div>
+        <div class="vil-ticks" id="vil-ticks"></div>
+        <p class="caption">Encoded vertically integrated liquid (VIL, 0–255). Tick marks are the six intensity thresholds
+          used for scoring: 16 is light rain, 133 a heavy storm core, 219 the most extreme cells.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="score">
+    <header>
+      <h2 id="score">Scorecard</h2>
+      <p id="score-text"></p>
+    </header>
+    <div class="card">
+      <div class="card-head">
+        <h3>CSI-M, mean critical success index over six VIL thresholds</h3>
+        <div class="legend" id="bar-legend"></div>
+      </div>
+      <div class="chart" id="bar-chart" style="min-height:0"></div>
+      <p class="note" id="bar-note"></p>
+    </div>
+    <div class="table-wrap"><table id="metrics-table"></table></div>
+    <p class="note">MSE is on the 0–1 scaled VIL (×10⁻³). BIAS-133 above 1 means the method draws too much heavy rain,
+      below 1 too little. Pool4 and pool16 compute CSI after 4×4 and 16×16 km max-pooling, which forgives small
+      position errors.</p>
+  </section>
+
+  <section class="section" aria-labelledby="lead">
+    <header>
+      <h2 id="lead">Skill by lead time</h2>
+      <p id="lead-text"></p>
+    </header>
+    <div class="card">
+      <div class="card-head">
+        <div class="chips" role="group" aria-label="Metric" id="lead-chips"></div>
+        <div class="legend" id="lead-legend"></div>
+      </div>
+      <div class="chart" id="lead-chart"></div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="sota">
+    <header>
+      <h2 id="sota">Swapping in a state-of-the-art model</h2>
+      <p id="sota-text"></p>
+    </header>
+    <div class="two">
+      <div class="section" style="gap:12px">
+        <h3>What Earthformer is</h3>
+        <ul class="plain" id="ef-list"></ul>
+      </div>
+      <div class="section" style="gap:12px">
+        <h3>Provenance and safety checks</h3>
+        <ul class="plain" id="safety-list"></ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="inside">
+    <header>
+      <h2 id="inside">Our from-scratch model, FlowCastNet</h2>
+      <p id="inside-text"></p>
+    </header>
+    <div class="flow">
+      <div><strong>13 radar frames</strong><span>65 minutes of history, folded 4×4 into a 96 × 96 grid with 208 channels.</span></div>
+      <div><strong>ConvNeXt U-Net</strong><span id="arch-text">13.5M parameters over four scales (96 → 12 cells), 7 × 7 depthwise kernels for a large receptive field.</span></div>
+      <div><strong>Motion field</strong><span>One displacement field per lead time. The latest frame is warped along it, a learned semi-Lagrangian step.</span></div>
+      <div><strong>Growth and decay</strong><span>A full-resolution intensity correction added on top of the advected frame.</span></div>
+      <div><strong>12 forecast frames</strong><span>advected + residual. Both heads start at zero, so an untrained model is exactly persistence.</span></div>
+    </div>
+    <div class="plate">
+      <img src="figures/anatomy.png" alt="Anatomy of one forecast: last observation with learned motion arrows, the advected frame at plus 60 minutes, the growth and decay residual, the final forecast, and the ground truth.">
+      <p class="caption" id="anatomy-caption">One forecast taken apart at t+60 min. Arrows show where the network moves the storm.
+        Red in the residual panel is intensification the advection alone cannot explain; blue is decay.</p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="rollout">
+    <header>
+      <h2 id="rollout">Three hours of autoregressive simulation</h2>
+      <p id="rollout-text"></p>
+    </header>
+    <div class="plate">
+      <img src="figures/rollout.gif" alt="Three-hour simulation of a held-out storm event: ground truth, FlowCastNet and optical flow side by side.">
+      <p class="caption" id="rollout-caption"></p>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <div class="chips" role="group" aria-label="Metric" id="roll-chips"></div>
+        <div class="legend" id="roll-legend"></div>
+      </div>
+      <div class="chart" id="roll-chart"></div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="data">
+    <header>
+      <h2 id="data">Data and training</h2>
+    </header>
+    <div class="two">
+      <div class="section" style="gap:12px">
+        <h3>What we pulled</h3>
+        <ul class="plain" id="data-list"></ul>
+      </div>
+      <div class="section" style="gap:12px">
+        <h3>How we trained</h3>
+        <ul class="plain" id="train-list"></ul>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h3>FlowCastNet validation CSI-M during training</h3>
+        <p class="note" style="margin:0">EMA weights, held-out events, scored every 2,500 steps</p>
+      </div>
+      <div class="chart" id="train-chart" style="min-height:220px"></div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="next">
+    <header>
+      <h2 id="next">What this shows, and what is next</h2>
+    </header>
+    <div class="two">
+      <div class="section" style="gap:12px">
+        <h3>Takeaways</h3>
+        <ul class="plain" id="takeaways"></ul>
+      </div>
+      <div class="section" style="gap:12px">
+        <h3>Where it falls short</h3>
+        <ul class="plain" id="limits"></ul>
+      </div>
+    </div>
+    <div class="section" style="gap:12px">
+      <h3>Next steps</h3>
+      <ul class="plain" id="nextsteps"></ul>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="repro">
+    <header><h2 id="repro">Reproduce it</h2></header>
+    <pre id="repro-cmds"></pre>
+  </section>
+
+  <footer id="footer"></footer>
+</main>
+
+<script id="report-data" type="application/json">/*__DATA__*/</script>
+<script>
+(() => {
+  const D = JSON.parse(document.getElementById('report-data').textContent);
+  const $ = (id) => document.getElementById(id);
+  const METHODS = D.methods;
+  const VAR = D.method_vars;
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const fmt = (v, d = 3) => (v == null ? '—' : Number(v).toFixed(d));
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const el = (tag, attrs = {}, parent) => {
+    const n = document.createElementNS(svgNS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    if (parent) parent.appendChild(n);
+    return n;
+  };
+
+  /* ---------- text blocks ---------- */
+  $('facts').innerHTML = D.facts.map(([k, v, s]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}<small>${esc(s)}</small></dd></div>`).join('');
+  for (const id of ['score-text', 'lead-text', 'rollout-text', 'rollout-caption', 'anatomy-caption', 'arch-text', 'bar-note', 'sota-text', 'inside-text', 'lede']) {
+    if (D.text[id]) $(id).innerHTML = D.text[id];
+  }
+  for (const id of ['data-list', 'train-list', 'takeaways', 'limits', 'nextsteps', 'ef-list', 'safety-list']) {
+    $(id).innerHTML = (D.lists[id] || []).map((t) => `<li>${t}</li>`).join('');
+  }
+  $('repro-cmds').textContent = D.repro;
+  $('footer').innerHTML = D.footer;
+
+  /* ---------- VIL colour strip ---------- */
+  const strip = $('vil-strip');
+  for (let v = 0; v < 256; v++) {
+    const k = D.vil.levels.findIndex((l, i) => v >= l && v < D.vil.levels[i + 1]);
+    const s = document.createElement('span');
+    s.style.background = D.vil.colors[k];
+    strip.appendChild(s);
+  }
+  $('vil-ticks').innerHTML = [0, ...D.thresholds, 255].map((t) =>
+    `<span style="left:${(t + 0.5) / 256 * 100}%">${t}</span>`).join('');
+
+  /* ---------- case viewer ---------- */
+  let caseIdx = 0, view = 'anim';
+  const showCase = () => {
+    const c = D.cases[caseIdx];
+    const img = $('case-img');
+    img.src = view === 'anim' ? c.gif : c.png;
+    img.alt = `Test case ${c.index}: ground truth beside each method's forecast ` +
+      (view === 'anim' ? 'animated over 2 hours.' : 'at 5, 15, 30, 45 and 60 minutes.');
+    $('case-caption').innerHTML = c.caption;
+    document.querySelectorAll('#case-chips .chip').forEach((b, i) => b.setAttribute('aria-pressed', i === caseIdx));
+    $('view-anim').setAttribute('aria-pressed', view === 'anim');
+    $('view-frames').setAttribute('aria-pressed', view === 'frames');
+  };
+  $('case-chips').innerHTML = D.cases.map((c, i) => `<button class="chip" type="button" data-i="${i}">${esc(c.label)}</button>`).join('');
+  $('case-chips').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { caseIdx = +b.dataset.i; showCase(); } });
+  $('view-anim').addEventListener('click', () => { view = 'anim'; showCase(); });
+  $('view-frames').addEventListener('click', () => { view = 'frames'; showCase(); });
+  showCase();
+
+  /* ---------- legends ---------- */
+  const legend = (id, names) => {
+    $(id).innerHTML = names.map((n) => `<span><i style="background:var(${VAR[n] || '--ref'})"></i>${esc(n)}</span>`).join('');
+  };
+
+  /* ---------- horizontal bar chart (CSI-M) ---------- */
+  function barChart(host) {
+    const rows = D.bars;
+    const draw = () => {
+      host.innerHTML = '';
+      const W = host.clientWidth, rowH = 34, groupH = 26, labelW = Math.min(170, W * 0.38), right = 52;
+      let y = 6;
+      const layout = [];
+      let lastGroup = null;
+      for (const r of rows) {
+        if (r.group !== lastGroup) { layout.push({ header: r.group, y }); y += groupH; lastGroup = r.group; }
+        layout.push({ row: r, y }); y += rowH;
+      }
+      const H = y + 22;
+      const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, height: H, role: 'img', 'aria-label': 'CSI-M by method' }, host);
+      const x0 = labelW, x1 = W - right, max = 0.5;
+      const sx = (v) => x0 + (v / max) * (x1 - x0);
+      for (let t = 0; t <= max + 1e-9; t += 0.1) {
+        el('line', { x1: sx(t), x2: sx(t), y1: 0, y2: H - 20, stroke: css('--rule'), 'stroke-width': 1 }, svg);
+        el('text', { x: sx(t), y: H - 4, 'text-anchor': 'middle' }, svg).textContent = t.toFixed(1);
+      }
+      for (const item of layout) {
+        if (item.header) {
+          el('text', { x: 0, y: item.y + 16, class: 'lbl', style: 'font-size:11px;letter-spacing:.06em;fill:' + css('--muted') }, svg).textContent = item.header.toUpperCase();
+          continue;
+        }
+        const r = item.row, cy = item.y + rowH / 2, bh = 18, w = Math.max(2, sx(r.value) - x0);
+        el('text', { x: 0, y: cy + 4, class: 'lbl' }, svg).textContent = r.name;
+        const color = r.series ? css(VAR[r.series]) : css('--ref');
+        // 4px rounded data-end, square at the baseline
+        el('path', { d: `M${x0},${cy - bh / 2} h${w - 4} a4,4 0 0 1 4,4 v${bh - 8} a4,4 0 0 1 -4,4 h${-(w - 4)} z`, fill: color }, svg);
+        el('text', { x: x0 + w + 6, y: cy + 4, class: 'val' }, svg).textContent = r.value.toFixed(3);
+      }
+      el('line', { x1: x0, x2: x0, y1: 0, y2: H - 20, stroke: css('--axis'), 'stroke-width': 1 }, svg);
+    };
+    draw();
+    return draw;
+  }
+
+  /* ---------- line chart with crosshair tooltip ---------- */
+  function lineChart(host, getSpec) {
+    const tip = document.createElement('div');
+    tip.className = 'tip';
+    tip.hidden = true;
+    const draw = () => {
+      const spec = getSpec();
+      host.innerHTML = '';
+      host.appendChild(tip);
+      const W = host.clientWidth, H = spec.height || 280;
+      const m = { l: 46, r: 16, t: 14, b: 38 };
+      const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, height: H, role: 'img', 'aria-label': spec.label }, host);
+      const xs = spec.x, xmin = xs[0], xmax = xs[xs.length - 1];
+      const all = spec.series.flatMap((s) => s.values);
+      let ymax = spec.ymax ?? Math.max(...all) * 1.08, ymin = spec.ymin ?? 0;
+      const step = niceStep((ymax - ymin) / 4);
+      ymax = Math.ceil(ymax / step) * step;
+      const sx = (v) => m.l + (v - xmin) / (xmax - xmin) * (W - m.l - m.r);
+      const sy = (v) => H - m.b - (v - ymin) / (ymax - ymin) * (H - m.t - m.b);
+      for (let v = ymin; v <= ymax + 1e-9; v += step) {
+        el('line', { x1: m.l, x2: W - m.r, y1: sy(v), y2: sy(v), stroke: css('--rule'), 'stroke-width': 1 }, svg);
+        el('text', { x: m.l - 8, y: sy(v) + 4, 'text-anchor': 'end' }, svg).textContent = spec.yfmt(v);
+      }
+      el('line', { x1: m.l, x2: W - m.r, y1: sy(ymin), y2: sy(ymin), stroke: css('--axis'), 'stroke-width': 1 }, svg);
+      const xticks = spec.xticks || xs;
+      for (const v of xticks) el('text', { x: sx(v), y: H - m.b + 18, 'text-anchor': 'middle' }, svg).textContent = v;
+      el('text', { x: (m.l + W - m.r) / 2, y: H - 4, 'text-anchor': 'middle' }, svg).textContent = 'lead time (minutes)';
+      if (spec.marker) {
+        el('line', { x1: sx(spec.marker.x), x2: sx(spec.marker.x), y1: m.t, y2: sy(ymin), stroke: css('--ink-2'), 'stroke-width': 1 }, svg);
+        el('text', { x: sx(spec.marker.x) + 6, y: m.t + 10, class: 'lbl', style: 'font-size:11px' }, svg).textContent = spec.marker.label;
+      }
+      for (const s of spec.series) {
+        const d = s.values.map((v, i) => `${i ? 'L' : 'M'}${sx(xs[i]).toFixed(1)},${sy(v).toFixed(1)}`).join('');
+        el('path', { d, fill: 'none', stroke: css(VAR[s.name]), 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, svg);
+      }
+      for (const s of spec.series) {   // end dots with a surface ring
+        const i = s.values.length - 1;
+        el('circle', { cx: sx(xs[i]), cy: sy(s.values[i]), r: 4, fill: css(VAR[s.name]), stroke: css('--surface'), 'stroke-width': 2 }, svg);
+      }
+      const cross = el('line', { y1: m.t, y2: sy(ymin), stroke: css('--axis'), 'stroke-width': 1, visibility: 'hidden' }, svg);
+      const dots = spec.series.map((s) => el('circle', { r: 4.5, fill: css(VAR[s.name]), stroke: css('--surface'), 'stroke-width': 2, visibility: 'hidden' }, svg));
+      const hit = el('rect', { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: 'transparent' }, svg);
+      const move = (ev) => {
+        const r = svg.getBoundingClientRect();
+        const px = (ev.clientX - r.left) * (W / r.width);
+        let i = 0, best = Infinity;
+        xs.forEach((v, k) => { const dd = Math.abs(sx(v) - px); if (dd < best) { best = dd; i = k; } });
+        cross.setAttribute('x1', sx(xs[i])); cross.setAttribute('x2', sx(xs[i])); cross.setAttribute('visibility', 'visible');
+        spec.series.forEach((s, k) => { dots[k].setAttribute('cx', sx(xs[i])); dots[k].setAttribute('cy', sy(s.values[i])); dots[k].setAttribute('visibility', 'visible'); });
+        const rows = spec.series.map((s) => [s, s.values[i]]).sort((a, b) => b[1] - a[1]);
+        tip.innerHTML = `<b>t + ${xs[i]} min · ${esc(spec.metric)}</b>` + rows.map(([s, v]) =>
+          `<div><i style="background:${css(VAR[s.name])}"></i>${esc(s.name)}  ${spec.yfmt(v, true)}</div>`).join('');
+        tip.hidden = false;
+        const hostR = host.getBoundingClientRect();
+        let left = sx(xs[i]) * (r.width / W) + 14;
+        if (left + tip.offsetWidth > hostR.width) left = sx(xs[i]) * (r.width / W) - tip.offsetWidth - 14;
+        tip.style.left = Math.max(0, left) + 'px';
+        tip.style.top = '8px';
+      };
+      const leave = () => { tip.hidden = true; cross.setAttribute('visibility', 'hidden'); dots.forEach((d) => d.setAttribute('visibility', 'hidden')); };
+      hit.addEventListener('pointermove', move);
+      hit.addEventListener('pointerdown', move);
+      hit.addEventListener('pointerleave', leave);
+    };
+    draw();
+    return draw;
+  }
+  function niceStep(raw) {
+    const p = Math.pow(10, Math.floor(Math.log10(raw)));
+    const f = raw / p;
+    return (f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10) * p;
+  }
+
+  /* ---------- metric selectors ---------- */
+  function metricChart(prefix, source, options, xs, marker) {
+    let current = options[0].key;
+    const chips = $(prefix + '-chips');
+    chips.innerHTML = options.map((o) => `<button class="chip" type="button" data-k="${o.key}">${esc(o.label)}</button>`).join('');
+    const sync = () => chips.querySelectorAll('.chip').forEach((b) => b.setAttribute('aria-pressed', b.dataset.k === current));
+    const draw = lineChart($(prefix + '-chart'), () => {
+      const o = options.find((q) => q.key === current);
+      return {
+        label: o.label + ' by lead time', metric: o.label, x: xs, xticks: xs.filter((v) => v % (xs.length > 12 ? 30 : 10) === 0 || v === xs[0]),
+        marker, ymin: 0, ymax: o.ymax,
+        yfmt: (v, tip) => o.key === 'mse' ? v.toFixed(tip ? 2 : 0) : v.toFixed(tip ? 3 : 1),
+        series: METHODS.filter((n) => source[n]).map((n) => ({ name: n, values: o.key === 'mse' ? source[n].mse.map((v) => v * 1e3) : source[n].csi[o.key] })),
+      };
+    });
+    chips.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { current = b.dataset.k; sync(); draw(); } });
+    sync();
+    legend(prefix + '-legend', METHODS.filter((n) => source[n]));
+    return draw;
+  }
+  const leadOpts = D.thresholds.map((t) => ({ key: String(t), label: `CSI ≥ ${t}` })).concat([{ key: 'mse', label: 'MSE ×10⁻³' }]);
+  leadOpts.unshift(leadOpts.splice(2, 1)[0]);   // open on the heavy-storm threshold (133)
+  const redraw = [];
+  redraw.push(metricChart('lead', D.test, leadOpts, D.leads));
+  const rollOpts = [{ key: '133', label: 'CSI ≥ 133' }, { key: '74', label: 'CSI ≥ 74' }, { key: '16', label: 'CSI ≥ 16' }, { key: 'mse', label: 'MSE ×10⁻³' }];
+  if (D.rollout) redraw.push(metricChart('roll', D.rollout, rollOpts, D.rollout_leads, { x: 60, label: 'trained horizon' }));
+
+  legend('bar-legend', METHODS);
+  $('bar-legend').insertAdjacentHTML('beforeend', '<span><i style="background:var(--ref)"></i>Published</span>');
+  redraw.push(barChart($('bar-chart')));
+
+  /* training curve: one series */
+  redraw.push(lineChart($('train-chart'), () => ({
+    label: 'Validation CSI-M by training step', metric: 'val CSI-M', height: 220,
+    x: D.training.val.map((p) => p[0]), xticks: D.training.val.map((p) => p[0]).filter((_, i, a) => i % Math.ceil(a.length / 6) === 0 || i === a.length - 1),
+    ymin: Math.floor(Math.min(...D.training.val.map((p) => p[1])) * 20) / 20, ymax: undefined,
+    yfmt: (v, tip) => v.toFixed(tip ? 3 : 2),
+    series: [{ name: 'FlowCastNet', values: D.training.val.map((p) => p[1]) }],
+  })));
+  // the training chart's x axis is steps, not minutes
+  const fixTrainAxis = () => { const t = [...$('train-chart').querySelectorAll('text')].find((n) => n.textContent === 'lead time (minutes)'); if (t) t.textContent = 'training step'; };
+  fixTrainAxis();
+
+  /* ---------- metrics table ---------- */
+  const cols = [['CSI-M', 'csi_m'], ...D.thresholds.map((t) => [`CSI-${t}`, 'csi' + t]), ['Pool4', 'pool4'], ['Pool16', 'pool16'], ['Bias-133', 'bias133'], ['MSE', 'mse']];
+  const lowerBetter = { mse: true };
+  const best = {};
+  for (const [, k] of cols) {
+    const vals = METHODS.map((n) => D.table[n]?.[k]).filter((v) => v != null);
+    if (k === 'bias133') best[k] = vals.reduce((a, b) => (Math.abs(b - 1) < Math.abs(a - 1) ? b : a));
+    else best[k] = lowerBetter[k] ? Math.min(...vals) : Math.max(...vals);
+  }
+  const rowHtml = (name, r, swatch) => `<tr><td>${swatch ? `<span class="sw" style="background:var(${swatch})"></span>` : ''}${esc(name)}</td>` +
+    cols.map(([, k]) => `<td class="${r[k] != null && r[k] === best[k] && swatch ? 'best' : ''}">${r[k] == null ? '—' : fmt(r[k], k === 'mse' ? 2 : 3)}</td>`).join('') + '</tr>';
+  $('metrics-table').innerHTML = `<thead><tr><th>Method</th>${cols.map(([h]) => `<th>${h}</th>`).join('')}</tr></thead><tbody>` +
+    `<tr class="group"><td colspan="${cols.length + 1}">This study · official SEVIR nowcast test · ${D.test_windows.toLocaleString()} windows</td></tr>` +
+    METHODS.map((n) => rowHtml(n, D.table[n], VAR[n])).join('') +
+    `<tr class="group"><td colspan="${cols.length + 1}">Published · Earthformer SEVIR benchmark (Gao et al., NeurIPS 2022)</td></tr>` +
+    D.refs.map((r) => rowHtml(r.name, r, null)).join('') + '</tbody>';
+
+  /* ---------- responsive redraw ---------- */
+  let width = document.body.clientWidth, pending = null;
+  new ResizeObserver(() => {
+    if (Math.abs(document.body.clientWidth - width) < 4) return;
+    width = document.body.clientWidth;
+    clearTimeout(pending);
+    pending = setTimeout(() => { redraw.forEach((f) => f()); fixTrainAxis(); }, 120);
+  }).observe(document.body);
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { redraw.forEach((f) => f()); fixTrainAxis(); });
+  new MutationObserver(() => { redraw.forEach((f) => f()); fixTrainAxis(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+})();
+</script>

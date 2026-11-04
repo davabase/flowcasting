@@ -2,3 +2,6 @@ h5py
 numpy
 pandas
 matplotlib
+torch>=2.1
+opencv-python
+pillow
