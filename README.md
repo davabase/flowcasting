@@ -38,6 +38,35 @@ it predicts the next 12 frames (60 minutes) and can be rolled out autoregressive
 It is scored against ground truth on the official SEVIR nowcast test set alongside persistence and
 an optical-flow (DIS + semi-Lagrangian) baseline.
 
+## Pysteps optical flow comparison
+
+Install `requirements.txt`, then evaluate the open-source [pysteps](https://pysteps.github.io/)
+baseline on the same official SEVIR test set:
+
+```powershell
+.\.venv\Scripts\python.exe evaluate.py --methods persistence,optical_flow,pysteps --device cpu
+.\.venv\Scripts\python.exe build_report.py
+```
+
+Open `results/report/index.html`. Metrics are saved in `results/metrics.json` and
+per-window scores in `results/per_sample_pysteps.npz`. Evaluation uses CUDA automatically
+when available; `--device cpu` supports machines without CUDA. Use `--limit 8 --out results/smoke`
+for a separate smoke run, so partial metrics do not replace full-test results.
+
+The full-test results and method details are recorded in [report/pysteps.md](report/pysteps.md).
+
+`Pysteps LK` uses pysteps 1.21.5 Lucas–Kanade motion on the last four observations
+(the same three recent frame pairs as DIS), followed by deterministic semi-Lagrangian
+extrapolation for all 12 leads. Linear interpolation, one midpoint iteration, zero
+outside the grid, and rounded uint8 outputs make the settings explicit. It operates
+directly on encoded VIL, without conversion to rain rate or a logarithmic transform.
+This is an optical flow baseline, not the stochastic STEPS ensemble nowcast.
+All methods share the original grid, targets, lead times, thresholds and scoring code.
+
+To include trained models, append `flowcast,earthformer,earthformer_ft` to `--methods`
+once their checkpoints are available, then regenerate the figures and report.
+The report includes a baseline-only comparison when ML evaluation artifacts are absent.
+
 ## Pipeline
 
 ```powershell

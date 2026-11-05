@@ -1,6 +1,6 @@
 """Score forecasts on the official SEVIR nowcast test set (1,872 windows, Jun-Nov 2019).
 
-Methods: persistence, optical flow (DIS + semi-Lagrangian extrapolation) and FlowCastNet.
+Methods: persistence, DIS optical flow, pysteps Lucas-Kanade extrapolation and neural models.
 Metrics follow the SEVIR/Earthformer convention (see flowcast/metrics.py). Each method's results are
 cached in results/metrics.json, plus per-sample scores in results/per_sample_<method>.npz.
 """
@@ -18,7 +18,7 @@ from flowcast.metrics import Scores, summary_row
 
 CHUNK = 4   # windows per GPU batch (inference + scoring stay well under the VRAM cap)
 NAMES = {'persistence': 'Persistence', 'optical_flow': 'Optical flow', 'flowcast': 'FlowCastNet',
-         'earthformer': 'Earthformer', 'earthformer_ft': 'Earthformer FT'}
+         'earthformer': 'Earthformer', 'earthformer_ft': 'Earthformer FT', 'pysteps': 'Pysteps LK'}
 
 
 def per_sample(pred, target):
@@ -36,7 +36,9 @@ def per_sample(pred, target):
 def main():
     global CHUNK
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--methods', default='persistence,optical_flow,flowcast')
+    parser.add_argument('--methods', default='persistence,optical_flow,pysteps,flowcast')
+    parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
+    parser.add_argument('--threads', type=int, default=4, help='PyTorch CPU threads')
     parser.add_argument('--checkpoint', default='runs/flowcast/best.pt')
     parser.add_argument('--ft-checkpoint', default='runs/earthformer_ft/best.pt', help='Fine-tuned Earthformer')
     parser.add_argument('--out', default='results')
@@ -44,15 +46,22 @@ def main():
     parser.add_argument('--chunk', type=int, default=CHUNK, help='Windows per GPU batch')
     args = parser.parse_args()
     CHUNK = args.chunk
+    methods = args.methods.split(',')
+    if any(m not in NAMES for m in methods):
+        parser.error(f'Methods must be chosen from {list(NAMES)}')
+    if args.chunk < 1 or args.threads < 1 or (args.limit is not None and args.limit < 1):
+        parser.error('--chunk, --threads and --limit must be positive')
+    torch.set_num_threads(args.threads)
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = out_dir / 'metrics.json'
     all_results = json.loads(metrics_path.read_text()) if metrics_path.exists() else {}
-    device = 'cuda'
-    torch.cuda.set_per_process_memory_fraction(min(1.0, 2.5e9 / torch.cuda.mem_get_info()[1]))
+    device = args.device
+    if device.startswith('cuda'):
+        torch.cuda.set_per_process_memory_fraction(min(1.0, 2.5e9 / torch.cuda.mem_get_info()[1]))
 
     model = None
-    for method in args.methods.split(','):
+    for method in methods:
         if method in ('flowcast', 'earthformer', 'earthformer_ft'):
             from flowcast.predict import forecast, load_model
             source = {'flowcast': args.checkpoint, 'earthformer': 'earthformer-pretrained',
@@ -68,13 +77,15 @@ def main():
                 block = block[:args.limit - start]
             inputs, target = block[:, :IN_FRAMES], block[:, IN_FRAMES:]
             fc = baselines.optical_flow(inputs)[0] if method == 'optical_flow' else None
+            if method == 'pysteps':
+                fc = baselines.pysteps(inputs)[0]
 
             def chunk_forecasts():
                 # One chunk at a time, so only CHUNK forecasts ever live on the GPU.
                 for i in range(0, len(inputs), CHUNK):
                     if method == 'persistence':
                         yield torch.as_tensor(baselines.persistence(inputs[i:i + CHUNK]), device=device)
-                    elif method == 'optical_flow':
+                    elif method in ('optical_flow', 'pysteps'):
                         yield torch.as_tensor(fc[i:i + CHUNK], device=device)
                     else:
                         yield forecast(model, inputs[i:i + CHUNK], batch=CHUNK)[0]['forecast']
@@ -89,6 +100,15 @@ def main():
             print(f'{method}: {count} windows scored ({time.time() - started:.0f}s)', flush=True)
         result = scores.result()
         result['windows'] = count
+        result['elapsed_seconds'] = time.time() - started
+        if method == 'pysteps':
+            from importlib.metadata import version
+            result['configuration'] = {
+                'package': 'pysteps', 'version': version('pysteps'), 'motion': 'LK',
+                'motion_frames': 4, 'extrapolation': 'semilagrangian',
+                'interp_order': 1, 'n_iter': 1, 'outval': 0,
+                'input_scale': 'encoded SEVIR VIL 0-255', 'output': 'rounded uint8',
+            }
         all_results[NAMES[method]] = result
         np.savez(out_dir / f'per_sample_{method}.npz', **{k: np.concatenate(v) for k, v in samples.items()})
         metrics_path.write_text(json.dumps(all_results, indent=1))

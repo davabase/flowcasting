@@ -5,3 +5,4 @@ matplotlib
 torch>=2.1
 opencv-python
 pillow
+pysteps==1.21.5

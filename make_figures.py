@@ -18,7 +18,7 @@ from flowcast.predict import forecast, load_model
 
 
 PER_SAMPLE = {'FlowCastNet': 'flowcast', 'Earthformer': 'earthformer', 'Earthformer FT': 'earthformer_ft',
-              'Optical flow': 'optical_flow'}
+              'Optical flow': 'optical_flow', 'Pysteps LK': 'pysteps'}
 
 
 def pick_cases(per_sample, n_storms=3, seed=0):
@@ -163,6 +163,8 @@ def main():
             if n == 0 and name == 'FlowCastNet':
                 anatomy(fig_dir / 'anatomy.png', inputs[0], truth[0], out)
         rows['Optical flow'] = baselines.optical_flow(inputs)[0][0]
+        if 'Pysteps LK' in metrics:
+            rows['Pysteps LK'] = baselines.pysteps(inputs)[0][0]
         rows['Persistence'] = np.repeat(inputs[0, -1:], 12, 0)
         when = meta.time_utc[idx]
         title = f'SEVIR test #{idx}  ·  {when} UTC'

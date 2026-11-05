@@ -17,7 +17,7 @@ _LUT = (np.array([matplotlib.colors.to_rgb(VIL_COLORS[np.searchsorted(VIL_LEVELS
                   for v in range(256)]) * 255).astype(np.uint8)
 
 METHOD_COLORS = {'FlowCastNet': '#2a78d6', 'Optical flow': '#eb6834', 'Persistence': '#1baf7a',
-                 'Earthformer': '#6250d6', 'Earthformer FT': '#e87ba4'}
+                 'Earthformer': '#6250d6', 'Earthformer FT': '#e87ba4', 'Pysteps LK': '#b58b12'}
 PLATE = '#111418'   # dark 'radar scope' background for imagery figures
 PLATE_INK = '#e6e9ee'
 

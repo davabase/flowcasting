@@ -10,10 +10,11 @@ import pandas as pd
 from flowcast.data import ROOT, TRAIN_DIR
 from flowcast.viz import VIL_COLORS, VIL_LEVELS
 
-ORDER = ['Earthformer', 'Earthformer FT', 'FlowCastNet', 'Optical flow', 'Persistence']
+ORDER = ['Earthformer', 'Earthformer FT', 'FlowCastNet', 'Pysteps LK', 'Optical flow', 'Persistence']
 VARS = {'FlowCastNet': '--s1', 'Optical flow': '--s2', 'Persistence': '--s3', 'Earthformer': '--s4', 'Earthformer FT': '--s5'}
+VARS['Pysteps LK'] = '--s6'
 PER_SAMPLE = {'FlowCastNet': 'flowcast', 'Earthformer': 'earthformer', 'Earthformer FT': 'earthformer_ft',
-              'Optical flow': 'optical_flow'}
+              'Optical flow': 'optical_flow', 'Pysteps LK': 'pysteps'}
 # Earthformer paper (Gao et al., NeurIPS 2022), SEVIR benchmark; verified CSI-M and MSE (x1e-3) only.
 REFS = [('Earthformer (paper)', 0.4419, 3.6957), ('ConvLSTM', 0.4185, 3.7532), ('U-Net', 0.3593, 4.1119),
         ('Persistence (paper)', 0.2613, 11.5338)]
@@ -47,6 +48,80 @@ def read_log(run):
     return [r for r in log if 'loss' in r], [r for r in log if 'val_csi_m' in r]
 
 
+def baseline_report(res, metrics):
+    """Build a measured comparison when trained-model artifacts are unavailable."""
+    from html import escape
+    from flowcast import baselines, viz
+    from flowcast.data import IN_FRAMES, read_test_samples
+    from flowcast.metrics import summary_row
+
+    out = res / 'report'
+    out.mkdir(parents=True, exist_ok=True)
+    counts = {r['windows'] for r in metrics.values()}
+    if len(counts) != 1:
+        raise ValueError('Report methods must be evaluated on the same number of test windows')
+    viz.lead_time_curves(out / 'lead_curves.png', metrics)
+    rows = {m: summary_row(r) for m, r in metrics.items()}
+    keys = list(next(iter(rows.values())))
+    table = '<tr><th>Method</th>' + ''.join(f'<th>{escape(k)}</th>' for k in keys) + '</tr>'
+    for method, row in rows.items():
+        table += f'<tr><th>{escape(method)}</th>' + ''.join(f'<td>{row[k]:.4f}</td>' for k in keys) + '</tr>'
+    config = escape(json.dumps(metrics.get('Pysteps LK', {}).get('configuration', {}), indent=2))
+    comparison = ''
+    if 'Pysteps LK' in rows and 'Optical flow' in rows:
+        delta = rows['Pysteps LK']['CSI-M'] - rows['Optical flow']['CSI-M']
+        comparison = (f'<p>Pysteps LK changes CSI-M by {delta:+.4f} relative to DIS optical flow. '
+                      f'Its normalized MSE is {rows["Pysteps LK"]["MSE(1e-3)"]:.4f} ×10⁻³, '
+                      f'compared with {rows["Optical flow"]["MSE(1e-3)"]:.4f} ×10⁻³ for DIS.</p>')
+    showcase = ''
+    sample_path = res / 'per_sample_optical_flow.npz'
+    if sample_path.exists():
+        with np.load(sample_path) as samples:
+            idx = int(np.argmax(samples['cover133']))
+        window = read_test_samples([idx])
+        inputs, truth = window[:, :IN_FRAMES], window[:, IN_FRAMES:]
+        fields = {'Ground truth': truth[0]}
+        for name, method in [('Pysteps LK', baselines.pysteps), ('Optical flow', baselines.optical_flow)]:
+            if name in metrics:
+                fields[name] = method(inputs)[0][0]
+        if 'Persistence' in metrics:
+            fields['Persistence'] = baselines.persistence(inputs)[0]
+        viz.forecast_grid(out / 'comparison.png', inputs[0], fields,
+                          title=f'SEVIR test #{idx}: greatest target coverage at VIL ≥ 133')
+        showcase = (f'<h2>Example: test window {idx}</h2><p>Selected by greatest ground-truth coverage at VIL ≥ 133, '
+                    'independently of forecast scores.</p><img src="comparison.png" alt="Observed and forecast radar at selected leads">')
+    html = f'''<!doctype html><html lang="en"><meta charset="utf-8">
+<title>SEVIR optical flow comparison</title>
+<style>body{{font:16px system-ui;max-width:1200px;margin:40px auto;padding:20px;color:#182333}}
+table{{border-collapse:collapse;font-size:13px}}td,th{{padding:9px;border-bottom:1px solid #ddd;text-align:right}}
+img{{width:100%}}pre{{background:#f2f4f6;padding:20px;overflow:auto}}.table{{overflow:auto}}</style>
+<h1>SEVIR optical flow comparison</h1>
+<p>All methods scored on the same {next(iter(counts)):,} official SEVIR test windows, in dataset order.
+Each window supplies 13 observed VIL frames and 12 target frames at 5-minute intervals on the original 384 × 384 grid.</p>
+<p>Pysteps uses Lucas–Kanade motion from the last four observations (three consecutive pairs), followed by
+deterministic semi-Lagrangian extrapolation. DIS uses the existing three-pair average and OpenCV advection.
+Persistence repeats the last observation. Both flow methods receive the same recent context and fill incoming
+areas outside the image with zero. Forecasts are rounded to uint8 before scoring.</p>
+<p>Inputs remain encoded VIL (0–255); no rain-rate conversion, logarithmic transform, stochastic STEPS ensemble,
+or parameter tuning on the test set is used. This measures optical flow extrapolation on this benchmark.</p>
+<div class="table"><table>{table}</table></div>
+{comparison}
+<p>CSI-M averages CSI at thresholds 16, 74, 133, 160, 181, 219. Counts are summed over all windows, pixels and leads
+before division. Pool4/16 use max pooling. MSE and MAE use VIL divided by 255. Higher CSI is better; lower error is better.</p>
+<img src="lead_curves.png" alt="CSI and error by lead time">
+{showcase}
+<p>ML model comparisons are pending: this checkout has no saved model checkpoints or prior evaluation outputs.
+Published scores are not substituted for local measurements.</p>
+<h2>Reproduce</h2><pre>python evaluate.py --methods persistence,optical_flow,pysteps --device cpu
+python build_report.py</pre>
+<h2>Pysteps configuration</h2><pre>{config}</pre>
+<p>References: <a href="https://pysteps.readthedocs.io/en/stable/auto_examples/plot_optical_flow.html">Pysteps optical flow</a>;
+<a href="https://pysteps.readthedocs.io/en/stable/generated/pysteps.extrapolation.semilagrangian.extrapolate.html">extrapolation API</a>.
+Full per-lead metrics and per-window scores are saved beside this report in the results directory.</p></html>'''
+    (out / 'index.html').write_text(html, encoding='utf-8')
+    print('Wrote', (out / 'index.html').resolve())
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--results', default='results')
@@ -56,10 +131,15 @@ def main():
     RES, run, ft_run = Path(args.results), Path(args.run), Path(args.ft_run)
     OUT = RES / 'report'
     metrics = json.loads((RES / 'metrics.json').read_text())
+    if 'FlowCastNet' not in metrics:
+        baseline_report(RES, metrics)
+        return
     rollout = json.loads((RES / 'rollout_metrics.json').read_text()) if (RES / 'rollout_metrics.json').exists() else None
     cases = json.loads((RES / 'cases.json').read_text())
     methods = [m for m in ORDER if m in metrics]
-    models = [m for m in methods if m not in ('Optical flow', 'Persistence')]
+    if len({metrics[m]['windows'] for m in methods}) != 1:
+        raise ValueError('Report methods must be evaluated on the same number of test windows')
+    models = [m for m in methods if m not in ('Optical flow', 'Persistence', 'Pysteps LK')]
     t = {m: table_row(metrics[m]) for m in methods}
     best = max(models, key=lambda m: t[m]['csi_m'])
     of, pe, fc = t['Optical flow'], t['Persistence'], t['FlowCastNet']
@@ -129,12 +209,16 @@ def main():
             'network from scratch on a shared laptop GPU, we took Earthformer (Gao et al., NeurIPS 2022), the strongest '
             'published single-forecast model on this benchmark, which is also small. Out of the box, its official weights '
             f'score {ef["csi_m"]:.3f} CSI-M on our test set, reproducing the paper.' + ft_text)
+    if 'Pysteps LK' in t:
+        p = t['Pysteps LK']
+        text['score-text'] += (f' Pysteps LK scores {p["csi_m"]:.3f} CSI-M and {p["mse"]:.2f} ×10⁻³ MSE '
+                               'using deterministic Lucas–Kanade / semi-Lagrangian extrapolation on encoded VIL.')
     if rollout:
         rmodels = [m for m in ORDER if m in rollout]
 
         def rl(m, thr, minutes):
             return rollout[m]['per_lead']['csi'][0][rollout[m]['thresholds'].index(thr)][minutes // 5 - 1]
-        rbest = max([m for m in rmodels if m not in ('Optical flow', 'Persistence')],
+        rbest = max([m for m in rmodels if m not in ('Optical flow', 'Persistence', 'Pysteps LK')],
                     key=lambda m: rollout[m]['overall']['csi_m'][0])
         n_ev = rollout[rmodels[0]]['events']
         text['rollout-text'] = (
@@ -215,6 +299,11 @@ def main():
         'Optical-flow baseline: OpenCV DIS flow averaged over the last three frame pairs, then semi-Lagrangian '
         'extrapolation (the same idea as operational systems such as pySTEPS).',
     ]
+    if 'Pysteps LK' in metrics:
+        train_list.append('Pysteps LK: four recent VIL frames, Lucas–Kanade motion, deterministic semi-Lagrangian '
+                          'extrapolation with linear interpolation and zero outside the grid. Encoded VIL is used '
+                          'directly; outputs are rounded to uint8. This is not the stochastic STEPS ensemble. '
+                          'Configuration: ' + json.dumps(metrics['Pysteps LK'].get('configuration', {})))
     data_list = [
         f'<strong>{len(events):,} SEVIR VIL events</strong> ({gb:.1f} GB): all {storm:,} NOAA storm-report events before '
         f'June 2019, plus {len(events) - storm:,} randomly sampled events, because 84% of the test set is random events.',
@@ -263,7 +352,7 @@ def main():
             './train_supervised.sh --run runs/flowcast --steps 20000 --duty 0.75 --vram-gb 2.5',
             './train_supervised.sh --run runs/earthformer_ft --arch earthformer --init pretrained --freeze-stem \\',
             '       --no-augment --steps 8000 --batch 1 --lr 5e-5 --weight-decay 0 --duty 0.8 --vram-gb 2.8',
-            'python evaluate.py --methods persistence,optical_flow,flowcast,earthformer,earthformer_ft --chunk 1',
+            'python evaluate.py --methods persistence,optical_flow,pysteps,flowcast,earthformer,earthformer_ft --chunk 1',
             'python rollout.py --models "Earthformer FT=runs/earthformer_ft/best.pt,Earthformer=earthformer-pretrained,FlowCastNet=runs/flowcast/best.pt"',
             'python make_figures.py --models "...same list..." && python build_report.py',
         ]),
