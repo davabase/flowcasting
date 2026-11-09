@@ -7,11 +7,13 @@ Completed 2026-11-08 (America/Los_Angeles). All six methods use the same 1,872 o
 | Earthformer | 0.4469 | 0.4357 | 3.6364 |
 | Earthformer FT | 0.4279 | 0.4311 | 3.8308 |
 | FlowCastNet | 0.3966 | 0.4002 | 4.5777 |
-| Pysteps LK | 0.3507 | 0.3178 | 7.1347 |
-| Optical flow | 0.3495 | 0.3128 | 7.1907 |
+| pySTEPS LK | 0.3507 | 0.3178 | 7.1347 |
+| FlowCast Optical Flow | 0.3495 | 0.3128 | 7.1907 |
 | Persistence | 0.2654 | 0.2253 | 11.3346 |
 
-Pretrained Earthformer has the highest CSI-M. FlowCastNet improves over both optical flow baselines. Fine-tuning Earthformer does not improve test CSI-M in this run: 0.4279 versus 0.4469 for the pretrained weights.
+Pretrained Earthformer has the highest CSI-M. FlowCastNet improves over FlowCast Optical Flow and the pySTEPS LK baseline. Fine-tuning Earthformer does not improve test CSI-M in this run: 0.4279 versus 0.4469 for the pretrained weights.
+
+FlowCastNet and FlowCast Optical Flow are our in-house models. FlowCast Optical Flow uses OpenCV DIS motion estimation and semi-Lagrangian extrapolation, with pySTEPS LK as the external optical flow baseline. Pretrained and fine-tuned Earthformer serve as the neural comparison baselines; persistence is a shared reference.
 
 ## Training and selection
 
@@ -24,7 +26,7 @@ Earthformer includes external pretraining, so this comparison does not isolate a
 
 ## Artifacts and reproduction
 
-Open `results/report/index.html` for interactive lead-time curves, full threshold and pooled metrics, training history, and four radar forecast comparisons. Figures include all three model variants plus DIS, pysteps, and persistence. The separate three-hour rollout experiment was not run.
+Open `results/report/index.html` for interactive lead-time curves, full threshold and pooled metrics, training history, and four radar forecast comparisons. Figures include all three model variants plus FlowCast Optical Flow, pySTEPS LK, and persistence. The separate three-hour rollout experiment was not run.
 
 Full metrics: `results/metrics.json`; per-window scores: `results/per_sample_<method>.npz`; checkpoints and run configs: `runs/flowcast/` and `runs/earthformer_ft/`. Generated results, data and checkpoints follow the existing gitignore convention.
 

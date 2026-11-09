@@ -3,7 +3,7 @@ import unittest
 
 import numpy as np
 
-from flowcast.baselines import pysteps
+from flowcast.pysteps import pysteps
 
 
 class PystepsBaselineTests(unittest.TestCase):

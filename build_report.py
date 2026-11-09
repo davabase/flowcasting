@@ -20,6 +20,17 @@ REFS = [('Earthformer (paper)', 0.4419, 3.6957), ('ConvLSTM', 0.4185, 3.7532), (
         ('Persistence (paper)', 0.2613, 11.5338)]
 
 
+def report_labels(value):
+    """Use report names while preserving saved evaluation keys and artifact paths."""
+    if isinstance(value, str):
+        return value.replace('Optical flow', 'FlowCast Optical Flow').replace('Pysteps LK', 'pySTEPS LK')
+    if isinstance(value, list):
+        return [report_labels(item) for item in value]
+    if isinstance(value, dict):
+        return {report_labels(key): report_labels(item) for key, item in value.items()}
+    return value
+
+
 def by_threshold(result, key='csi', pool=0):
     return {str(t): result['per_lead'][key][pool][k] for k, t in enumerate(result['thresholds'])}
 
@@ -35,7 +46,7 @@ def table_row(r):
 
 def prose(m):
     """Method name inside a sentence: model names keep their capitals, baselines do not."""
-    return m.lower() if m in ('Optical flow', 'Persistence') else m
+    return m.lower() if m == 'Persistence' else m
 
 
 def listing(items):
@@ -52,6 +63,8 @@ def baseline_report(res, metrics):
     """Build a measured comparison when trained-model artifacts are unavailable."""
     from html import escape
     from flowcast import baselines, viz
+    from flowcast.optical_flow import optical_flow
+    from flowcast.pysteps import pysteps
     from flowcast.data import IN_FRAMES, read_test_samples
     from flowcast.metrics import summary_row
 
@@ -70,9 +83,9 @@ def baseline_report(res, metrics):
     comparison = ''
     if 'Pysteps LK' in rows and 'Optical flow' in rows:
         delta = rows['Pysteps LK']['CSI-M'] - rows['Optical flow']['CSI-M']
-        comparison = (f'<p>Pysteps LK changes CSI-M by {delta:+.4f} relative to DIS optical flow. '
+        comparison = (f'<p>Pysteps LK changes CSI-M by {delta:+.4f} relative to FlowCast Optical Flow. '
                       f'Its normalized MSE is {rows["Pysteps LK"]["MSE(1e-3)"]:.4f} ×10⁻³, '
-                      f'compared with {rows["Optical flow"]["MSE(1e-3)"]:.4f} ×10⁻³ for DIS.</p>')
+                      f'compared with {rows["Optical flow"]["MSE(1e-3)"]:.4f} ×10⁻³ for FlowCast Optical Flow.</p>')
     showcase = ''
     sample_path = res / 'per_sample_optical_flow.npz'
     if sample_path.exists():
@@ -81,7 +94,7 @@ def baseline_report(res, metrics):
         window = read_test_samples([idx])
         inputs, truth = window[:, :IN_FRAMES], window[:, IN_FRAMES:]
         fields = {'Ground truth': truth[0]}
-        for name, method in [('Pysteps LK', baselines.pysteps), ('Optical flow', baselines.optical_flow)]:
+        for name, method in [('Pysteps LK', pysteps), ('Optical flow', optical_flow)]:
             if name in metrics:
                 fields[name] = method(inputs)[0][0]
         if 'Persistence' in metrics:
@@ -118,7 +131,7 @@ python build_report.py</pre>
 <p>References: <a href="https://pysteps.readthedocs.io/en/stable/auto_examples/plot_optical_flow.html">Pysteps optical flow</a>;
 <a href="https://pysteps.readthedocs.io/en/stable/generated/pysteps.extrapolation.semilagrangian.extrapolate.html">extrapolation API</a>.
 Full per-lead metrics and per-window scores are saved beside this report in the results directory.</p></html>'''
-    (out / 'index.html').write_text(html, encoding='utf-8')
+    (out / 'index.html').write_text(report_labels(html), encoding='utf-8')
     print('Wrote', (out / 'index.html').resolve())
 
 
@@ -173,7 +186,7 @@ def main():
         'lede': ('Radar nowcasting on a local GPU. A model reads the last 65 minutes of weather radar and simulates the '
                  'next hour, one 5-minute frame at a time, over a 384 × 384 km window. We compare a state-of-the-art '
                  'transformer fine-tuned on 40 GB of SEVIR storms, our own physics-shaped network, and the classical '
-                 'baselines, scoring every frame against what the radar actually recorded.'),
+                 'comparison methods, scoring every frame against what the radar actually recorded.'),
         'bar-note': (
             'Higher is better. CSI = hits / (hits + misses + false alarms), pooled over every pixel, lead time and test '
             'window. Published numbers come from the Earthformer paper, whose SEVIR test set covers the same 2019 period '
@@ -183,10 +196,10 @@ def main():
             + f'persistence scores {pe["csi_m"]:.3f} against 0.261. Published scores use a different number of windows.'),
         'score-text': (
             f'On the official SEVIR nowcast test set, {best} reaches a CSI-M of <strong>{t[best]["csi_m"]:.3f}</strong>, '
-            f'against {fc["csi_m"]:.3f} for our from-scratch FlowCastNet, {of["csi_m"]:.3f} for optical-flow '
+            f'against {fc["csi_m"]:.3f} for our from-scratch FlowCastNet, {of["csi_m"]:.3f} for FlowCast Optical Flow '
             f'extrapolation and {pe["csi_m"]:.3f} for persistence. Its mean squared error is {t[best]["mse"]:.2f} ×10⁻³, '
-            f'{100 * (1 - t[best]["mse"] / of["mse"]):.0f}% lower than optical flow, and its CSI on the most extreme cells '
-            f'(VIL ≥ 219) is {t[best]["csi219"]:.3f}, against {of["csi219"]:.3f}. Per test window it beats optical flow on '
+            f'{100 * (1 - t[best]["mse"] / of["mse"]):.0f}% lower than FlowCast Optical Flow, and its CSI on the most extreme cells '
+            f'(VIL ≥ 219) is {t[best]["csi219"]:.3f}, against {of["csi219"]:.3f}. Per test window it beats FlowCast Optical Flow on '
             f'{win74:.0%} of windows with rain at VIL ≥ 74 and {win133:.0%} of windows with heavy cores at VIL ≥ 133.'),
         'lead-text': (
             'Forecast skill varies with lead time. At 60 minutes, heavy-storm CSI '
@@ -198,7 +211,7 @@ def main():
             'model. Most of what happens to a storm in an hour is that the wind carries it somewhere else; the rest is '
             'growth, decay and new cells forming. The network predicts those two parts separately, so its output stays '
             f'inspectable. Trained from scratch for {steps:,} steps it reaches CSI-M {fc["csi_m"]:.3f}, '
-            f'compared with {of["csi_m"]:.3f} for DIS optical flow.'),
+            f'compared with {of["csi_m"]:.3f} for FlowCast Optical Flow.'),
     }
     if ef:
         ft_text = ''
@@ -230,7 +243,7 @@ def main():
             f'Heavy cores are the hard part: at VIL ≥ 133, {rbest} scores {rl(rbest, 133, 60):.3f} at one hour, '
             f'{rl(rbest, 133, 120):.3f} at two and {rl(rbest, 133, 180):.3f} at three, against '
             f'{rl("Optical flow", 133, 60):.3f}, {rl("Optical flow", 133, 120):.3f} and {rl("Optical flow", 133, 180):.3f} '
-            'for optical flow. Each pass through a model smooths a little more.')
+            'for FlowCast Optical Flow. Each pass through a model smooths a little more.')
         s = np.load(RES / 'rollout_showcase.npz')
         when = f'({str(s["time_utc"])[:16]} UTC)' if 'time_utc' in s else ''
         text['rollout-caption'] = (f'<strong>Event {s["id"]}</strong> {when}, the test-period event '
@@ -305,11 +318,11 @@ def main():
         f'GPU: {config.get("gpu", "not recorded")}; PyTorch {config.get("torch", "not recorded")}. '
         f'bf16 with a per-process VRAM cap. FlowCastNet peaked at '
         f'{max(r["peak_vram_gb"] for r in train_rows):.1f} GB at about {sps:.0f} windows per second.',
-        'Optical-flow baseline: OpenCV DIS flow averaged over the last three frame pairs, then semi-Lagrangian '
+        'FlowCast Optical Flow (our in-house model): OpenCV DIS flow averaged over the last three frame pairs, then semi-Lagrangian '
         'extrapolation (the same idea as operational systems such as pySTEPS).',
     ]
     if 'Pysteps LK' in metrics:
-        train_list.append('Pysteps LK: four recent VIL frames, Lucas–Kanade motion, deterministic semi-Lagrangian '
+        train_list.append('pySTEPS LK (external optical flow baseline): four recent VIL frames, Lucas–Kanade motion, deterministic semi-Lagrangian '
                           'extrapolation with linear interpolation and zero outside the grid. Encoded VIL is used '
                           'directly; outputs are rounded to uint8. This is not the stochastic STEPS ensemble. '
                           'Configuration: ' + json.dumps(metrics['Pysteps LK'].get('configuration', {})))
@@ -355,7 +368,7 @@ def main():
                   'takeaways': [
                       f'{max(methods, key=lambda m: t[m]["csi_m"])} has the highest measured test CSI-M '
                       f'({max(t[m]["csi_m"] for m in methods):.4f}) among the local runs.',
-                      f'FlowCastNet scores {fc["csi_m"]:.4f}, compared with {of["csi_m"]:.4f} for DIS optical flow '
+                      f'FlowCastNet scores {fc["csi_m"]:.4f}, compared with {of["csi_m"]:.4f} for FlowCast Optical Flow '
                       f'and {pe["csi_m"]:.4f} for persistence.',
                   ],
                   'limits': [
@@ -389,6 +402,7 @@ def main():
         for k, v in json.loads(extra.read_text(encoding='utf-8')).items():
             (data['lists'] if k in data['lists'] else data['text'])[k] = v
 
+    data = report_labels(data)
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / 'figures').mkdir(exist_ok=True)
     for f in ['anatomy.png'] + (['rollout.gif'] if rollout else []) + [f'case{n}.{e}' for n in range(len(cases)) for e in ('gif', 'png')]:

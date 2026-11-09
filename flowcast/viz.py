@@ -22,6 +22,10 @@ PLATE = '#111418'   # dark 'radar scope' background for imagery figures
 PLATE_INK = '#e6e9ee'
 
 
+def method_label(name):
+    return {'Optical flow': 'FlowCast Optical Flow', 'Pysteps LK': 'pySTEPS LK'}.get(name, name)
+
+
 def colorize(frame):
     """uint8 (H, W) encoded VIL -> RGB uint8 (H, W, 3)."""
     return _LUT[np.clip(np.asarray(frame), 0, 255).astype(np.uint8)]
@@ -63,7 +67,7 @@ def comparison_gif(path, inputs, rows, step_minutes=5, scale=0.5, title=None):
             x0 = pad + j * (tw + pad)
             frame = inputs[k] if observed else rows[name][k - inputs.shape[0]]
             canvas.paste(tile(frame), (x0, header + label_h))
-            draw.text((x0, header + 4), name if not observed else ('Observed' if j == 0 else ''),
+            draw.text((x0, header + 4), method_label(name) if not observed else ('Observed' if j == 0 else ''),
                       fill=(235, 235, 235), font=font)
         stamp = f'observed  t{minutes:+d} min' if observed else f'forecast  t+{minutes} min'
         draw.text((pad, header + label_h + th + 4), stamp,
@@ -96,14 +100,14 @@ def forecast_grid(path, inputs, rows, leads=(1, 3, 6, 9, 12), step_minutes=5, ti
                         _quiver(ax, flow)
                 else:
                     ax.axis('off')
-                ax.set_ylabel(name, fontsize=10, color=PLATE_INK)
+                ax.set_ylabel(method_label(name), fontsize=10, color=PLATE_INK)
                 continue
             lead = leads[j - 1]
             ax.imshow(rows[name][lead - 1], cmap=VIL_CMAP, norm=VIL_NORM, interpolation='nearest')
             if i == 0:
                 ax.set_title(f't0 + {lead * step_minutes} min', fontsize=9, color=PLATE_INK)
     for i, name in enumerate(names):
-        axes[i, 1].set_ylabel(name, fontsize=10, color=PLATE_INK)
+        axes[i, 1].set_ylabel(method_label(name), fontsize=10, color=PLATE_INK)
     if title:
         fig.suptitle(title, fontsize=11, color=PLATE_INK)
     fig.tight_layout()
@@ -127,9 +131,9 @@ def lead_time_curves(path, results, step_minutes=5, thresholds=(16, 74, 133, 181
         color = METHOD_COLORS.get(name)
         for ax, t in zip(axes, thresholds):
             k = r['thresholds'].index(t)
-            ax.plot(leads, r['per_lead']['csi'][0][k], label=name, color=color, lw=2)
+            ax.plot(leads, r['per_lead']['csi'][0][k], label=method_label(name), color=color, lw=2)
             ax.set_title(f'CSI  VIL ≥ {t}', fontsize=10)
-        axes[-1].plot(leads, np.array(r['per_lead']['mse']) * 1e3, label=name, color=color, lw=2)
+        axes[-1].plot(leads, np.array(r['per_lead']['mse']) * 1e3, label=method_label(name), color=color, lw=2)
     axes[-1].set_title('MSE (×10⁻³)', fontsize=10)
     for ax in axes:
         ax.set_xlabel('lead time (min)')

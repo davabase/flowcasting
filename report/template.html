@@ -17,7 +17,7 @@
   --plate-ink: #e6e9ee;
   --plate-muted: #8b94a1;
   --s1: #2a78d6;      /* FlowCastNet */
-  --s2: #eb6834;      /* Optical flow */
+  --s2: #eb6834;      /* FlowCast Optical Flow */
   --s3: #1baf7a;      /* Persistence */
   --s4: #6250d6;      /* Earthformer (pretrained) */
   --s5: #e87ba4;      /* Earthformer fine-tuned */
@@ -218,6 +218,7 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--rule)
 
   <section class="section" aria-labelledby="inside">
     <header>
+      <p>Our models are FlowCastNet (neural nowcasting) and FlowCast Optical Flow (OpenCV DIS motion with semi-Lagrangian extrapolation). We compare FlowCast Optical Flow with the external pySTEPS LK baseline, and FlowCastNet with pretrained and fine-tuned Earthformer baselines. Persistence provides a shared reference.</p>
       <h2 id="inside">Our from-scratch model, FlowCastNet</h2>
       <p id="inside-text"></p>
     </header>
@@ -241,7 +242,7 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--rule)
       <p id="rollout-text"></p>
     </header>
     <div class="plate">
-      <img id="rollout-image" alt="Three-hour simulation of a held-out storm event: ground truth, FlowCastNet and optical flow side by side.">
+      <img id="rollout-image" alt="Three-hour simulation of a held-out storm event: ground truth, FlowCastNet and FlowCast Optical Flow side by side.">
       <p class="caption" id="rollout-caption"></p>
     </div>
     <div class="card">

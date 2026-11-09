@@ -17,6 +17,7 @@ import numpy as np
 import torch
 
 from flowcast import baselines
+from flowcast.optical_flow import optical_flow
 from flowcast.data import IN_FRAMES, ROOT, load_manifest, read_event
 from flowcast.metrics import Scores
 from flowcast.predict import load_model, rollout
@@ -48,7 +49,7 @@ def main():
         x = np.stack([read_event(s, args.events) for s in rows.slot])
         inputs, truth = x[:, :IN_FRAMES], x[:, IN_FRAMES:IN_FRAMES + args.steps]
         preds = {n: rollout(m, inputs, args.steps, batch=args.batch) for n, m in models.items()}
-        preds['Optical flow'] = baselines.optical_flow(inputs, args.steps)[0]
+        preds['Optical flow'] = optical_flow(inputs, args.steps)[0]
         preds['Persistence'] = baselines.persistence(inputs, args.steps)
         target = torch.as_tensor(truth, device=device).float()
         for n in names:

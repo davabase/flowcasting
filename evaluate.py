@@ -13,6 +13,8 @@ import numpy as np
 import torch
 
 from flowcast import baselines
+from flowcast.optical_flow import optical_flow
+from flowcast.pysteps import pysteps
 from flowcast.data import IN_FRAMES, OUT_FRAMES, iter_test_blocks
 from flowcast.metrics import Scores, summary_row
 
@@ -76,9 +78,9 @@ def main():
             if args.limit is not None:
                 block = block[:args.limit - start]
             inputs, target = block[:, :IN_FRAMES], block[:, IN_FRAMES:]
-            fc = baselines.optical_flow(inputs)[0] if method == 'optical_flow' else None
+            fc = optical_flow(inputs)[0] if method == 'optical_flow' else None
             if method == 'pysteps':
-                fc = baselines.pysteps(inputs)[0]
+                fc = pysteps(inputs)[0]
 
             def chunk_forecasts():
                 # One chunk at a time, so only CHUNK forecasts ever live on the GPU.

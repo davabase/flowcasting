@@ -13,6 +13,8 @@ import pandas as pd
 import torch
 
 from flowcast import baselines, viz
+from flowcast.optical_flow import optical_flow
+from flowcast.pysteps import pysteps
 from flowcast.data import IN_FRAMES, ROOT, read_test_samples
 from flowcast.predict import forecast, load_model
 
@@ -118,7 +120,7 @@ def scatter(path, nn, of):
         ax.plot([0, 1], [0, 1], 'k--', lw=1)
         win = (b[keep] > a[keep]).mean()
         ax.set_title(f'per-window CSI  VIL ≥ {t}\nFlowCastNet better on {win:.0%} of {keep.sum()} windows', fontsize=10)
-        ax.set_xlabel('Optical flow')
+        ax.set_xlabel('FlowCast Optical Flow')
         ax.set_ylabel('FlowCastNet')
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
@@ -162,9 +164,9 @@ def main():
             rows[name] = np.clip(np.rint(out['forecast'][0].cpu().numpy()), 0, 255).astype(np.uint8)
             if n == 0 and name == 'FlowCastNet':
                 anatomy(fig_dir / 'anatomy.png', inputs[0], truth[0], out)
-        rows['Optical flow'] = baselines.optical_flow(inputs)[0][0]
+        rows['Optical flow'] = optical_flow(inputs)[0][0]
         if 'Pysteps LK' in metrics:
-            rows['Pysteps LK'] = baselines.pysteps(inputs)[0][0]
+            rows['Pysteps LK'] = pysteps(inputs)[0][0]
         rows['Persistence'] = np.repeat(inputs[0, -1:], 12, 0)
         when = meta.time_utc[idx]
         title = f'SEVIR test #{idx}  ·  {when} UTC'
