@@ -241,7 +241,7 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--rule)
       <p id="rollout-text"></p>
     </header>
     <div class="plate">
-      <img src="figures/rollout.gif" alt="Three-hour simulation of a held-out storm event: ground truth, FlowCastNet and optical flow side by side.">
+      <img id="rollout-image" alt="Three-hour simulation of a held-out storm event: ground truth, FlowCastNet and optical flow side by side.">
       <p class="caption" id="rollout-caption"></p>
     </div>
     <div class="card">
@@ -270,7 +270,7 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--rule)
     <div class="card">
       <div class="card-head">
         <h3>FlowCastNet validation CSI-M during training</h3>
-        <p class="note" style="margin:0">EMA weights, held-out events, scored every 2,500 steps</p>
+        <p class="note" style="margin:0">EMA weights, held-out validation events</p>
       </div>
       <div class="chart" id="train-chart" style="min-height:220px"></div>
     </div>
@@ -505,7 +505,11 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--rule)
   const redraw = [];
   redraw.push(metricChart('lead', D.test, leadOpts, D.leads));
   const rollOpts = [{ key: '133', label: 'CSI ≥ 133' }, { key: '74', label: 'CSI ≥ 74' }, { key: '16', label: 'CSI ≥ 16' }, { key: 'mse', label: 'MSE ×10⁻³' }];
-  if (D.rollout) redraw.push(metricChart('roll', D.rollout, rollOpts, D.rollout_leads, { x: 60, label: 'trained horizon' }));
+  if (D.rollout) {
+    $('rollout-image').src = 'figures/rollout.gif';
+    redraw.push(metricChart('roll', D.rollout, rollOpts, D.rollout_leads, { x: 60, label: 'trained horizon' }));
+  }
+  else $('rollout').closest('section').style.display = 'none';
 
   legend('bar-legend', METHODS);
   $('bar-legend').insertAdjacentHTML('beforeend', '<span><i style="background:var(--ref)"></i>Published</span>');

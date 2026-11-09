@@ -16,7 +16,7 @@ Pysteps 1.21.5 Lucas–Kanade motion estimation uses the last four observations 
 
 This evaluates optical flow extrapolation, not the stochastic STEPS ensemble algorithm. There is no rain-rate conversion, log transform, training, or tuning on test targets.
 
-ML comparisons could not be rerun in this checkout because saved model checkpoints and prior evaluation results were absent. The full report/figure pipeline now includes Pysteps LK when ML artifacts are available.
+The neural models were subsequently trained and evaluated on the same test windows. See [the full model comparison](model_comparison.md) for their results and validation-selected checkpoints.
 
 ## Reproduce
 

@@ -152,6 +152,8 @@ def main():
     train_rows, val_rows = read_log(run)
     ft_config = json.loads((ft_run / 'config.json').read_text()) if (ft_run / 'config.json').exists() else None
     ft_train, ft_val = read_log(ft_run)
+    selected = max(val_rows, key=lambda r: r['val_csi_m']) if val_rows else None
+    ft_selected = max(ft_val, key=lambda r: r['val_csi_m']) if ft_val else None
     events = pd.read_csv(TRAIN_DIR / 'events.csv')
     events = events[np.load(TRAIN_DIR / 'events.done.npy')[events.slot.values]]
     clean = events[events.pct_missing == 0]
@@ -168,7 +170,7 @@ def main():
     ef = t.get('Earthformer')
     eft = t.get('Earthformer FT')
     text = {
-        'lede': ('Radar nowcasting on a laptop GPU. A model reads the last 65 minutes of weather radar and simulates the '
+        'lede': ('Radar nowcasting on a local GPU. A model reads the last 65 minutes of weather radar and simulates the '
                  'next hour, one 5-minute frame at a time, over a 384 × 384 km window. We compare a state-of-the-art '
                  'transformer fine-tuned on 40 GB of SEVIR storms, our own physics-shaped network, and the classical '
                  'baselines, scoring every frame against what the radar actually recorded.'),
@@ -178,7 +180,7 @@ def main():
             'but more windows. '
             + (f'The official Earthformer weights score {ef["csi_m"]:.3f} on our test set against 0.442 in the paper, and '
                if ef else '')
-            + f'persistence scores {pe["csi_m"]:.3f} against 0.261, so the two test sets are of similar difficulty.'),
+            + f'persistence scores {pe["csi_m"]:.3f} against 0.261. Published scores use a different number of windows.'),
         'score-text': (
             f'On the official SEVIR nowcast test set, {best} reaches a CSI-M of <strong>{t[best]["csi_m"]:.3f}</strong>, '
             f'against {fc["csi_m"]:.3f} for our from-scratch FlowCastNet, {of["csi_m"]:.3f} for optical-flow '
@@ -187,7 +189,7 @@ def main():
             f'(VIL ≥ 219) is {t[best]["csi219"]:.3f}, against {of["csi219"]:.3f}. Per test window it beats optical flow on '
             f'{win74:.0%} of windows with rain at VIL ≥ 74 and {win133:.0%} of windows with heavy cores at VIL ≥ 133.'),
         'lead-text': (
-            'Every method is nearly perfect five minutes out and degrades with lead time. At 60 minutes, heavy-storm CSI '
+            'Forecast skill varies with lead time. At 60 minutes, heavy-storm CSI '
             '(VIL ≥ 133) is ' + listing(f'{lead_val(m, 133, 60):.3f} for {prose(m)}' for m in methods) + '. '
             'Hover a line to read exact values.'),
         'arch-text': '13.5M parameters over four scales (96 → 12 cells), with 7 × 7 depthwise kernels for a large receptive field.',
@@ -195,8 +197,8 @@ def main():
             'Before swapping in Earthformer we built our own network. FlowCastNet is shaped like a simplified physical '
             'model. Most of what happens to a storm in an hour is that the wind carries it somewhere else; the rest is '
             'growth, decay and new cells forming. The network predicts those two parts separately, so its output stays '
-            f'inspectable. Trained from scratch for {steps:,} steps it reaches CSI-M {fc["csi_m"]:.3f}: well above the '
-            'classical baselines, but below the published deep models.'),
+            f'inspectable. Trained from scratch for {steps:,} steps it reaches CSI-M {fc["csi_m"]:.3f}, '
+            f'compared with {of["csi_m"]:.3f} for DIS optical flow.'),
     }
     if ef:
         ft_text = ''
@@ -205,10 +207,9 @@ def main():
                        f'{eft["csi_m"]:.3f} CSI-M and {eft["csi219"]:.3f} on extreme cells (VIL ≥ 219), against '
                        f'{ef["csi_m"]:.3f} and {ef["csi219"]:.3f} for the weights as published.')
         text['sota-text'] = (
-            'FlowCastNet beat the classical methods but stayed behind published deep models. Rather than train a bigger '
-            'network from scratch on a shared laptop GPU, we took Earthformer (Gao et al., NeurIPS 2022), the strongest '
-            'published single-forecast model on this benchmark, which is also small. Out of the box, its official weights '
-            f'score {ef["csi_m"]:.3f} CSI-M on our test set, reproducing the paper.' + ft_text)
+            'We also evaluate Earthformer (Gao et al., NeurIPS 2022), a pretrained cuboid-attention transformer. '
+            f'Its published weights score {ef["csi_m"]:.3f} CSI-M on our test set, compared with 0.442 '
+            'in the paper on a larger set of windows.' + ft_text)
     if 'Pysteps LK' in t:
         p = t['Pysteps LK']
         text['score-text'] += (f' Pysteps LK scores {p["csi_m"]:.3f} CSI-M and {p["mse"]:.2f} ×10⁻³ MSE '
@@ -252,7 +253,7 @@ def main():
         '<strong>Cuboid attention.</strong> The 13 input frames are encoded as one space-time block. Attention runs inside '
         'local cuboids (axial in time, height and width) plus a few global vectors that carry information across the '
         'whole 384 km window; the decoder then generates all 12 future frames at once.',
-        '<strong>8.7M parameters.</strong> Smaller than FlowCastNet (13.5M); one forecast takes about 0.3 s on this laptop GPU.',
+        '<strong>8.7M parameters.</strong> Smaller than FlowCastNet (13.5M).',
         '<strong>Trained on SEVIR before 2019.</strong> The official run used events up to 2019-01-01 for training and '
         'January–May 2019 for validation, so it has never seen the June–November 2019 test period.',
     ]
@@ -280,21 +281,29 @@ def main():
     ]
     if ef:
         safety.append(f'<strong>Behaviour check.</strong> On our test set the converted weights score {ef["csi_m"]:.3f} '
-                      f'CSI-M and {ef["mse"]:.2f} ×10⁻³ MSE, against 0.442 and 3.70 in the paper. A broken or tampered '
-                      'conversion would not land this close.')
+                      f'CSI-M and {ef["mse"]:.2f} ×10⁻³ MSE, against 0.442 and 3.70 in the paper. '
+                      'These are measured locally on the 1,872-window test set.')
 
     train_list = [
         f'<strong>FlowCastNet</strong>: {steps:,} steps at batch {config["batch"]} ({steps * config["batch"]:,} windows), '
         f'AdamW with cosine decay from {config["lr"]:g}, EMA weights. Loss: heavy-rain-weighted MSE + MAE, an auxiliary '
         'loss that makes the motion field explain as much as it can, and a smoothness penalty on the motion.',
     ]
+    if selected:
+        train_list.append(f'FlowCastNet uses the EMA checkpoint selected at step {selected["step"]:,} '
+                          f'by validation CSI-M ({selected["val_csi_m"]:.4f}), without test-set selection.')
+    train_list.append(f'Validation uses up to {config["val_events"]} held-out events with fixed windows '
+                      'starting at frames 0, 12 and 24. The official test set is used only for final evaluation.')
     if ft_config and ft_train:
         train_list.append(
             f'<strong>Earthformer fine-tune</strong>: {ft_train[-1]["step"]:,} steps at batch {ft_config["batch"]}, about '
             f'{np.median([r["samples_per_s"] for r in ft_train]):.1f} windows per second.')
+    if ft_selected:
+        train_list.append(f'Earthformer FT uses the EMA checkpoint selected at step {ft_selected["step"]:,} '
+                          f'by validation CSI-M ({ft_selected["val_csi_m"]:.4f}).')
     train_list += [
-        f'Shared laptop GPU (RTX 4070 Laptop, 8 GB): bf16, a hard per-process VRAM cap, a duty cycle that leaves compute '
-        f'for other jobs, and automatic resume from checkpoints. FlowCastNet peaked at '
+        f'GPU: {config.get("gpu", "not recorded")}; PyTorch {config.get("torch", "not recorded")}. '
+        f'bf16 with a per-process VRAM cap. FlowCastNet peaked at '
         f'{max(r["peak_vram_gb"] for r in train_rows):.1f} GB at about {sps:.0f} windows per second.',
         'Optical-flow baseline: OpenCV DIS flow averaged over the last three frame pairs, then semi-Lagrangian '
         'extrapolation (the same idea as operational systems such as pySTEPS).',
@@ -343,7 +352,17 @@ def main():
         'training': {'val': [[r['step'], r['val_csi_m']] for r in val_rows]},
         'text': text,
         'lists': {'data-list': data_list, 'train-list': train_list, 'ef-list': ef_list, 'safety-list': safety,
-                  'takeaways': [], 'limits': [], 'nextsteps': []},
+                  'takeaways': [
+                      f'{max(methods, key=lambda m: t[m]["csi_m"])} has the highest measured test CSI-M '
+                      f'({max(t[m]["csi_m"] for m in methods):.4f}) among the local runs.',
+                      f'FlowCastNet scores {fc["csi_m"]:.4f}, compared with {of["csi_m"]:.4f} for DIS optical flow '
+                      f'and {pe["csi_m"]:.4f} for persistence.',
+                  ],
+                  'limits': [
+                      'Earthformer includes external pretraining; these runs do not isolate architecture from training data and compute.',
+                      'The model runs use one training seed. Scores are point estimates on this test set, without confidence intervals.',
+                  ],
+                  'nextsteps': ['Repeat training with additional seeds to measure variability.']},
         'repro': '\n'.join([
             'python download_sevir_test.py                      # official test set (5 GB)',
             'python download_sevir_train.py --budget-gb 40      # training events (resumable)',
@@ -359,6 +378,12 @@ def main():
         'footer': ('Data: SEVIR (Veillette, Samsi & Mattioli, NeurIPS 2020), Registry of Open Data on AWS. Earthformer: Gao '
                    'et al., NeurIPS 2022 (code Apache-2.0; weights via PaddleScience). Built for CSCI 596.'),
     }
+    if ef and eft:
+        data['lists']['takeaways'].append(
+            f'The fine-tuned Earthformer scores {eft["csi_m"]:.4f} CSI-M versus {ef["csi_m"]:.4f} '
+            'for the pretrained weights. Fine-tuning does not improve test CSI-M in this run.'
+            if eft['csi_m'] <= ef['csi_m'] else
+            f'Fine-tuning raises Earthformer test CSI-M from {ef["csi_m"]:.4f} to {eft["csi_m"]:.4f}.')
     extra = RES / 'report_text.json'
     if extra.exists():   # hand-written takeaways / limits / next steps, kept separate from the generated numbers
         for k, v in json.loads(extra.read_text(encoding='utf-8')).items():
@@ -366,10 +391,10 @@ def main():
 
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / 'figures').mkdir(exist_ok=True)
-    for f in ['anatomy.png', 'rollout.gif'] + [f'case{n}.{e}' for n in range(len(cases)) for e in ('gif', 'png')]:
+    for f in ['anatomy.png'] + (['rollout.gif'] if rollout else []) + [f'case{n}.{e}' for n in range(len(cases)) for e in ('gif', 'png')]:
         shutil.copy(RES / 'figures' / f, OUT / 'figures' / f)
     template = Path('report/template.html').read_text(encoding='utf-8')
-    payload = json.dumps(data, ensure_ascii=False).replace('</', '<\\/')
+    payload = json.dumps(data, ensure_ascii=False).replace('<', '\\u003c')
     (OUT / 'index.html').write_text(template.replace('/*__DATA__*/', payload), encoding='utf-8')
     print('Wrote', (OUT / 'index.html').resolve())
 

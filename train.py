@@ -90,6 +90,8 @@ def main():
     parser.add_argument('--widths', default='96,192,384,384')
     parser.add_argument('--depths', default='2,2,4,2')
     parser.add_argument('--workers', type=int, default=6)
+    parser.add_argument('--threads', type=int, default=4)
+    parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--val-every', type=int, default=5000)
     parser.add_argument('--val-events', type=int, default=60)
     parser.add_argument('--log-every', type=int, default=200)
@@ -99,6 +101,8 @@ def main():
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--no-augment', action='store_true', help='Disable rotation/flip augmentation')
     args = parser.parse_args()
+    torch.set_num_threads(args.threads)
+    torch.manual_seed(args.seed)
 
     device = 'cuda'
     torch.backends.cudnn.benchmark = False     # autotuning grabs large workspaces; not worth it here
@@ -140,7 +144,9 @@ def main():
     val = ValWindows(max_events=args.val_events)
     print(f'{sum(p.numel() for p in model.parameters()) / 1e6:.1f}M params | '
           f'{len(train.slots)} training events | {len(val)} validation windows', flush=True)
-    (run / 'config.json').write_text(json.dumps({**vars(args), 'model': model.config}, indent=1))
+    (run / 'config.json').write_text(json.dumps({**vars(args), 'model': model.config,
+                                               'gpu': torch.cuda.get_device_name(),
+                                               'torch': torch.__version__}, indent=1))
     loader = torch.utils.data.DataLoader(train, batch_size=args.batch, num_workers=args.workers,
                                          pin_memory=True, persistent_workers=True, prefetch_factor=4,
                                          drop_last=True)
@@ -149,8 +155,10 @@ def main():
     ema_params, model_params = list(ema.parameters()), list(model.parameters())
 
     def checkpoint(name, metrics=None):
+        temporary = run / (name + '.tmp')
         torch.save({'model': model.state_dict(), 'ema': ema.state_dict(), 'opt': opt.state_dict(),
-                    'step': step, 'best': best, 'config': model.config, 'metrics': metrics}, run / name)
+                    'step': step, 'best': best, 'config': model.config, 'metrics': metrics}, temporary)
+        temporary.replace(run / name)
 
     model.train()
     tic, seen, running = time.time(), 0, {}
@@ -180,7 +188,7 @@ def main():
         seen += x.shape[0]
         for k, v in (('loss', data_loss), ('adv', adv_loss), ('smooth', smooth_loss), ('grad', grad_norm),
                      ('flow_px', out['flow_latent'][:, -1].norm(dim=1).mean() if 'flow_latent' in out else 0.0)):
-            running[k] = running.get(k, 0.0) + float(v)
+            running[k] = running.get(k, 0.0) + float(v.detach() if torch.is_tensor(v) else v)
         if args.duty < 1.0:
             torch.cuda.synchronize()
             time.sleep((time.time() - start) * (1 - args.duty) / args.duty)

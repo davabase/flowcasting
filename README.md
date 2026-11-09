@@ -67,6 +67,36 @@ To include trained models, append `flowcast,earthformer,earthformer_ft` to `--me
 once their checkpoints are available, then regenerate the figures and report.
 The report includes a baseline-only comparison when ML evaluation artifacts are absent.
 
+## GPU model training and comparison
+
+Completed test results are recorded in [report/model_comparison.md](report/model_comparison.md).
+
+With a CUDA-enabled PyTorch installation, train FlowCastNet from scratch and fine-tune
+Earthformer using the downloaded training events. These commands use validation CSI-M
+to select `best.pt`; the official test windows are evaluated only afterward.
+
+```powershell
+.\.venv\Scripts\python.exe train.py --run runs/flowcast --steps 20000 --batch 4 --workers 4 --vram-gb 10 --val-every 1000 --log-every 50 --ckpt-every 500
+.\.venv\Scripts\python.exe train.py --run runs/earthformer_ft --arch earthformer --init pretrained --freeze-stem --no-augment --steps 8000 --batch 1 --lr 5e-5 --weight-decay 0 --workers 2 --vram-gb 6 --val-every 1000 --log-every 50 --ckpt-every 500
+.\.venv\Scripts\python.exe evaluate.py --methods flowcast,earthformer,earthformer_ft --chunk 1
+.\.venv\Scripts\python.exe make_figures.py --models "Earthformer=earthformer-pretrained,Earthformer FT=runs/earthformer_ft/best.pt,FlowCastNet=runs/flowcast/best.pt"
+.\.venv\Scripts\python.exe build_report.py
+```
+
+The Earthformer initialization file must be at `data/pretrained/earthformer_sevir.pdparams`;
+its URL is recorded in `flowcast/earthformer.py`. Install `requirements.txt` for its `einops`
+dependency. The training seed defaults to 42, and run configs record the GPU and PyTorch
+version. Checkpoints are replaced atomically; add `--resume` to continue an interrupted
+run from `last.pt`. Existing baseline scores in `results/metrics.json` are preserved
+when evaluating the models. VRAM caps are per process; adjust them to your GPU.
+
+To resume both configured runs and then automatically evaluate, render figures, and
+rebuild the report, run `python run_comparison.py`. It reads each run's existing
+`config.json`, skips completed training schedules, and records its current stage in
+`logs/comparison_status.json`. Per-stage output is in `logs/comparison_<stage>.log`.
+Only one runner can run at a time. The computer must remain awake; rerun the same
+command after an interruption to continue from the saved checkpoints.
+
 ## Pipeline
 
 ```powershell
