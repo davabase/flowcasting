@@ -42,15 +42,20 @@ def _font(size):
     return ImageFont.load_default()
 
 
-def comparison_gif(path, inputs, rows, step_minutes=5, scale=0.5, title=None):
-    """Animate inputs then forecasts. rows: {name: (T_out, H, W)}; the first row should be ground truth."""
+def comparison_gif(path, inputs, rows, step_minutes=5, scale=0.5, title=None, columns=None):
+    """Animate observations then forecasts; optionally wrap method panels across rows."""
     names = list(rows)
+    if columns is not None and (not isinstance(columns, int) or columns < 1):
+        raise ValueError('columns must be a positive integer')
+    columns = min(columns or len(names), len(names))
+    panel_rows = (len(names) + columns - 1) // columns
     h, w = inputs.shape[1:]
     th, tw = int(h * scale), int(w * scale)
     pad, label_h = 6, 26
     header = 34 if title else 0
-    canvas_w = len(names) * (tw + pad) + pad
-    canvas_h = header + label_h + th + pad + 22
+    panel_height = label_h + th + pad
+    canvas_w = columns * (tw + pad) + pad
+    canvas_h = header + panel_rows * panel_height + 22
     font, small = _font(15), _font(13)
     images = []
 
@@ -66,15 +71,16 @@ def comparison_gif(path, inputs, rows, step_minutes=5, scale=0.5, title=None):
         observed = k < inputs.shape[0]
         minutes = (k - inputs.shape[0] + 1) * step_minutes
         for j, name in enumerate(names):
-            x0 = pad + j * (tw + pad)
+            x0 = pad + (j % columns) * (tw + pad)
+            y0 = header + (j // columns) * panel_height
             frame = inputs[k] if observed else rows[name][k - inputs.shape[0]]
-            canvas.paste(tile(frame), (x0, header + label_h))
+            canvas.paste(tile(frame), (x0, y0 + label_h))
             label = method_label(name) if not observed else ('Observed' if j == 0 else '')
             width = draw.textlength(label, font=font)
             label_font = _font(max(9, int(15 * tw / width))) if width > tw else font
-            draw.text((x0, header + 4), label, fill=(235, 235, 235), font=label_font)
+            draw.text((x0, y0 + 4), label, fill=(235, 235, 235), font=label_font)
         stamp = f'observed  t{minutes:+d} min' if observed else f'forecast  t+{minutes} min'
-        draw.text((pad, header + label_h + th + 4), stamp,
+        draw.text((pad, header + panel_rows * panel_height + 4), stamp,
                   fill=(150, 200, 255) if observed else (255, 190, 120), font=small)
         images.append(canvas)
     durations = [120] * inputs.shape[0] + [260] * (total - inputs.shape[0])

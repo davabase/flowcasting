@@ -5,6 +5,7 @@ method scores best on them, so the visual comparison is not cherry-picked.
 """
 import argparse
 import json
+import shutil
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -136,6 +137,8 @@ def main():
     parser.add_argument('--models', default='FlowCastNet=runs/flowcast/best.pt',
                         help='Comma-separated name=checkpoint pairs to show in the case figures')
     parser.add_argument('--results', default='results')
+    parser.add_argument('--readme-assets', action='store_true',
+                        help='Export larger storm GIFs in three columns to report/assets')
     parser.add_argument('--cuda', action=argparse.BooleanOptionalAction, default=None,
                         help='Include CUDA storm views (default: when CUDA comparison results exist)')
     args = parser.parse_args()
@@ -190,12 +193,25 @@ def main():
         animated = {k: v for k, v in rows.items() if k != 'Persistence'}
         viz.comparison_gif(fig_dir / f'case{n}.gif', inputs[0], animated, scale=0.6 if len(animated) <= 4 else 0.5,
                            title=title)
+        if args.readme_assets:
+            assets = Path('report/assets')
+            assets.mkdir(parents=True, exist_ok=True)
+            asset_names = ['storm_a', 'storm_b', 'storm_c', 'storm_moderate']
+            viz.comparison_gif(assets / f'{asset_names[n]}.gif', inputs[0], animated,
+                               scale=0.75, columns=3, title=title)
         scores = {k: float(v['csi74'][idx]) for k, v in per_sample.items()}
         if cuda_prediction is not None:
             focused = {'Ground truth': truth[0], 'Optical flow Python': python_prediction,
                        'Optical flow CUDA': cuda_prediction}
             viz.forecast_grid(fig_dir / f'case{n}_cuda.png', inputs[0], focused, title=title)
             viz.comparison_gif(fig_dir / f'case{n}_cuda.gif', inputs[0], focused, scale=0.75, title=title)
+            if args.readme_assets and n == 0:
+                shutil.copy2(fig_dir / f'case{n}_cuda.gif', assets / 'cpu_cuda_storm_a.gif')
+                if 'FlowCastNet' in rows:
+                    hero = {'Ground truth': truth[0], 'FlowCastNet': rows['FlowCastNet'],
+                            'Optical flow Python': python_prediction, 'Optical flow CUDA': cuda_prediction}
+                    viz.comparison_gif(assets / 'method_comparison_storm_a.gif', inputs[0], hero,
+                                       columns=2, scale=1.0, title=title)
             predicted, observed = cuda_prediction >= 74, truth[0] >= 74
             scores['Optical flow CUDA'] = float(np.count_nonzero(predicted & observed) /
                                                max(np.count_nonzero(predicted | observed), 1))
@@ -218,6 +234,11 @@ def main():
         viz.forecast_grid(fig_dir / 'rollout.png', s['inputs'], rows, leads=(6, 12, 18, 24, 30, 36),
                           title=f'3-hour simulation · {label}')
     (res / 'cases.json').write_text(json.dumps(case_info, indent=1))
+    if args.readme_assets:
+        shutil.copy2(fig_dir / 'anatomy.png', assets / 'flowcastnet_anatomy.png')
+        performance = res / 'report/figures/cuda_performance.png'
+        if performance.exists():
+            shutil.copy2(performance, assets / 'cpu_cuda_performance.png')
     if cuda_predictor is not None:
         cuda_predictor.close()
     print('Figures written to', fig_dir.resolve())

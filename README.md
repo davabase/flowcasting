@@ -1,42 +1,114 @@
-# SEVIR radar viewer
+# FlowCast: classical, CUDA and learned radar forecasts
 
-Install dependencies and open the interactive viewer in PowerShell:
+Compare classical optical flow, a native CUDA implementation, and machine learning on the same storms.
+Given 13 radar observations, each method predicts the next 12 frames: a one-hour forecast.
+
+**Classical motion estimation · GPU acceleration · FlowCastNet learned forecasts · 1,872 test windows**
+
+![Storm comparison in two rows: ground truth and FlowCastNet above CPU and CUDA optical flow](report/assets/method_comparison_storm_a.gif)
+
+*Top: ground truth and FlowCastNet. Bottom: classical CPU optical flow and native CUDA optical flow.
+All four panels use the same observations and forecast times. Observations play first, followed by the next hour of forecasts.*
+
+[CPU/CUDA report](report/optical_flow_cuda.md) · [Model results](report/model_comparison.md) ·
+[How FlowCastNet works](#how-flowcastnet-builds-a-forecast) · [Reproduce the report](#reproduce-the-report)
+
+## CPU vs CUDA optical flow results
+
+The native CUDA implementation moves motion estimation, confidence weighting, history alignment,
+growth/decay, filtering and advection onto the GPU. The CPU version uses Python, NumPy and OpenCV DIS.
+Both use the selected multi-gap settings and were evaluated on the same **1,872 official test windows**.
+
+| Implementation | CSI-M ↑ | CSI ≥ 133 ↑ | CSI ≥ 219 ↑ | MSE ×10⁻³ ↓ |
+|---|---:|---:|---:|---:|
+| CPU (Python / OpenCV) | 0.38343 | 0.35121 | 0.13942 | 5.75543 |
+| CUDA | 0.38309 | 0.35054 | 0.13828 | 5.74234 |
+
+| Implementation | Single-window mean | Batch mean per window | Batch throughput |
+|---|---:|---:|---:|
+| CPU (Python / OpenCV) | 410.23 ms | 77.44 ms | 12.91 windows/s |
+| CUDA | 9.26 ms | 9.20 ms | 108.65 windows/s |
+
+CUDA gives **44.3× lower single-window latency** and **8.4× higher batch throughput** on the measured
+machine: RTX 5060 Ti, Intel Core i9-12900K, Windows, CUDA 13.1, OpenCV 5.0.0 (November 18, 2026).
+
+
+<details>
+<summary>Timing protocol and hardware</summary>
+
+Warm timing uses 32 fixed test windows with three repeats, with input uploads, forecast/motion downloads
+and synchronization included. Disk reads, scoring and initial setup are excluded. Batch calls contain
+eight windows; CPU uses eight workers with one OpenCV thread each, while CUDA processes windows
+sequentially and parallelizes motion pairs, patches and pixels.
+
+</details>
+
+![CPU and CUDA single-window latency, batch computation time and forecast CSI-M by lead time](report/assets/cpu_cuda_performance.png)
+
+The parallel CUDA DIS solver produces different local forecasts from OpenCV DIS. Aggregate CSI-M is
+slightly lower and MSE slightly lower in this run; these are point estimates without confidence intervals.
+See [the measured comparison](report/optical_flow_cuda.md) for output differences and timing details,
+and [the CUDA guide](flowcasting_cuda/README.md) for build and benchmark commands.
+
+## Storm forecasts
+
+Each animation shows 65 minutes of observed radar followed by 60 minutes of forecasts, alongside
+what the radar actually recorded. Panels compare ground truth, Earthformer, fine-tuned Earthformer,
+FlowCastNet, CPU optical flow, CUDA optical flow, and pySTEPS LK. Colors show encoded VIL;
+the strongest echoes are red. The comparisons wrap into three columns so each storm stays large enough to inspect.
+
+**Storm A · August 30, 2019 · test window #302**
+
+![Storm A: observed radar and forecasts from the neural models, CPU optical flow, CUDA optical flow and pySTEPS](report/assets/storm_a.gif)
+
+<details>
+<summary>More storm comparisons: Storm B, Storm C, and a moderate event</summary>
+
+**Storm B · August 8, 2019 · test window #1852**
+
+![Storm B: ground truth and forecasts from all comparison methods](report/assets/storm_b.gif)
+
+**Storm C · September 28, 2019 · test window #908**
+
+![Storm C: ground truth and forecasts from all comparison methods](report/assets/storm_c.gif)
+
+**Moderate event · November 28, 2019 · test window #1591**
+
+![Moderate event: ground truth and forecasts from all comparison methods](report/assets/storm_moderate.gif)
+
+</details>
+
+The three strongest cases were selected by ground-truth heavy-echo coverage, with distinct events;
+the moderate case was sampled at random. Selection does not depend on which predictor wins.
+
+## How FlowCastNet builds a forecast
+
+FlowCastNet learns a displacement field that moves the last observation forward, plus an intensity
+residual for storm growth and decay. This example shows the last observation with learned motion
+arrows, the advected field at 60 minutes, the residual, the final forecast and the ground truth.
+Storm intensity uses the same palette as the animations; the residual uses a separate blue/red scale
+for negative/positive changes.
+
+![FlowCastNet forecast decomposition: observed radar and motion, advection, growth/decay residual, final prediction and ground truth](report/assets/flowcastnet_anatomy.png)
+
+The model is a ConvNeXt U-Net with a displacement head and an intensity-residual head. Both heads
+start at zero, so its initial forecast repeats the last observation. See [model results](report/model_comparison.md)
+for the full neural-model comparison. Generate the interactive report locally with `python build_report.py`
+after evaluation and figure generation; open `results/report/index.html` for storm selectors and key-frame views.
+
+## Reproduce the report
+
+With the SEVIR data, trained checkpoints and [native CUDA library](flowcasting_cuda/README.md) available:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe view_sevir.py
+.\.venv\Scripts\python.exe make_figures.py --cuda --readme-assets --models "Earthformer=earthformer-pretrained,Earthformer FT=runs/earthformer_ft/best.pt,FlowCastNet=runs/flowcast/best.pt"
+.\.venv\Scripts\python.exe build_report.py
 ```
 
-Choose an **Example** (0–1871), then select **Frames** such as `0,3,8`
-or `0:12:2` and click **Apply selection**. Ranges exclude the stop index.
-Alternatively, enter **N frames** and click **Show first N**.
-**Save PNG** saves the current view into `renders/`.
-
-The default dataset, `IN_vil`, contains 13 input radar frames per example.
-Change **Dataset** to `OUT_vil` for the corresponding 12 future target frames.
-Frame numbers are local to each dataset and start at zero. Colors show encoded
-SEVIR values on a fixed 0–255 scale for radar, not rainfall in physical units.
-Other available channels are printed at startup; their colors use the minimum
-and maximum of the selected frames.
-
-Render six frames, or export a specific selection without opening a window:
-
-```powershell
-.\.venv\Scripts\python.exe view_sevir.py --sample 10 -n 6
-.\.venv\Scripts\python.exe view_sevir.py --sample 10 --frames 0,3,8,12 --output renders/example10.png
-.\.venv\Scripts\python.exe view_sevir.py --dataset OUT_vil --sample 10 --frames 0:12 --output renders/targets10.png
-```
-
-Use `--file PATH` for another HDF5 file with datasets shaped
-`(examples, height, width, frames)` and `--columns N` to change the grid layout.
-Only selected frames are read into memory. The viewer limits grids to 64 frames.
-
-# FlowCast: learning to simulate radar
-
-FlowCast is a proof-of-concept neural radar simulator: given the last 13 VIL frames (65 minutes),
-it predicts the next 12 frames (60 minutes) and can be rolled out autoregressively for hours.
-It is scored against ground truth on the official SEVIR nowcast test set alongside persistence and
-an optical-flow (DIS + semi-Lagrangian) baseline.
+Open `results/report/index.html` for the interactive report. `--readme-assets` also refreshes the larger,
+three-column animations and illustrations in `report/assets/`. To recompute CPU/CUDA scores and timings,
+run `python benchmark_optical_flow_cuda.py` before rebuilding the report. Setup, evaluation and training
+details follow below.
 
 ## Pysteps optical flow comparison
 
@@ -147,3 +219,36 @@ kills a step.
 **Metrics.** CSI/POD/SUCC/BIAS are computed from hits, misses and false alarms summed over the whole test set
 at the SEVIR thresholds 16, 74, 133, 160, 181 and 219 (CSI-M is their mean), plus max-pooled CSI at 4 and 16 km
 and MSE/MAE on 0-1 scaled VIL. These follow the Earthformer convention, so the published numbers are comparable.
+
+## Explore the radar data
+
+Install dependencies and open the interactive viewer in PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe view_sevir.py
+```
+
+Choose an **Example** (0–1871), then select **Frames** such as `0,3,8`
+or `0:12:2` and click **Apply selection**. Ranges exclude the stop index.
+Alternatively, enter **N frames** and click **Show first N**.
+**Save PNG** saves the current view into `renders/`.
+
+The default dataset, `IN_vil`, contains 13 input radar frames per example.
+Change **Dataset** to `OUT_vil` for the corresponding 12 future target frames.
+Frame numbers are local to each dataset and start at zero. Colors show encoded
+SEVIR values on a fixed 0–255 scale for radar, not rainfall in physical units.
+Other available channels are printed at startup; their colors use the minimum
+and maximum of the selected frames.
+
+Render six frames, or export a specific selection without opening a window:
+
+```powershell
+.\.venv\Scripts\python.exe view_sevir.py --sample 10 -n 6
+.\.venv\Scripts\python.exe view_sevir.py --sample 10 --frames 0,3,8,12 --output renders/example10.png
+.\.venv\Scripts\python.exe view_sevir.py --dataset OUT_vil --sample 10 --frames 0:12 --output renders/targets10.png
+```
+
+Use `--file PATH` for another HDF5 file with datasets shaped
+`(examples, height, width, frames)` and `--columns N` to change the grid layout.
+Only selected frames are read into memory. The viewer limits grids to 64 frames.
