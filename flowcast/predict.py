@@ -3,22 +3,81 @@
 `path` is a FlowCast checkpoint (FlowCastNet or a fine-tuned Earthformer) or the literal
 'earthformer-pretrained' for the official SEVIR Earthformer weights.
 """
+import inspect
+
 import numpy as np
 import torch
 
 from .model import FlowCastNet
 
 
+def model_kwargs(config):
+    """Constructor arguments from a checkpoint config (which may also record e.g. the training loss)."""
+    params = inspect.signature(FlowCastNet.__init__).parameters
+    return {k: v for k, v in config.items() if k in params}
+
+
+class ScaleBlend(torch.nn.Module):
+    """Large scales (> ~16 km) from one model, small-scale detail from another: lowpass(a) + (b - lowpass(b)).
+
+    Classic nowcasting scale decomposition, used here to pair Earthformer's large-scale skill with the
+    fine-scale texture of a sharpened FlowCastNet. No training involved."""
+
+    def __init__(self, large, small):
+        super().__init__()
+        self.large, self.small = large, small
+        self.config = {'arch': 'earthformer' if getattr(large, 'config', {}).get('arch') == 'earthformer' else 'blend'}
+
+    def forward(self, x):
+        from .losses import _lowpass
+        a = self.large(x)['forecast'].float()
+        out = self.small(x)
+        b = out['forecast'].float()
+        if 'valid' in out:      # no data flows in across the domain edge: fill from the large-scale model there
+            b = out['valid'] * b + (1 - out['valid']) * a
+        return {'forecast': _lowpass(a) + b - _lowpass(b)}
+
+
+class OpticalFlowModel(torch.nn.Module):
+    """Optical-flow extrapolation (flowcast.optical_flow, CPU) behind the model interface, for use in a ScaleBlend."""
+
+    def __init__(self):
+        super().__init__()
+        self.anchor = torch.nn.Parameter(torch.zeros(()), requires_grad=False)   # gives the module a device
+        self.config = {'arch': 'optical_flow'}
+
+    def forward(self, x):
+        from .optical_flow import optical_flow_valid
+        frames = (x.float().clamp(0, 1) * 255).round().to(torch.uint8).cpu().numpy()
+        fc, valid = optical_flow_valid(frames)
+        return {'forecast': torch.as_tensor(fc, device=x.device).float() / 255,
+                'valid': torch.as_tensor(valid, device=x.device)}
+
+
 def load_model(path, device='cuda', use_ema=True):
+    if str(path) == 'optical-flow':
+        return OpticalFlowModel().to(device)
+    if str(path).startswith('blend:'):          # 'blend:<large-scale source>|<small-scale source>'
+        large, small = str(path)[6:].split('|')
+        return ScaleBlend(load_model(large, device, use_ema), load_model(small, device, use_ema)).eval()
     if str(path) == 'earthformer-pretrained':
         from .earthformer import load_pretrained
         return load_pretrained(device)[0]
+    seed = 0
+    if str(path).count('@') == 1 and str(path).rsplit('@', 1)[1].isdigit():   # 'refiner.pt@3': noise seed 3
+        path, seed = str(path).rsplit('@', 1)
+        seed = int(seed)
     ckpt = torch.load(path, map_location=device, weights_only=False)
+    if ckpt['config'].get('arch') == 'refiner':      # generative texture refiner on a frozen base forecaster
+        from .refiner import RefinedModel, TextureGenerator
+        gen = TextureGenerator().to(device)
+        gen.load_state_dict(ckpt['ema' if use_ema else 'gen'])
+        return RefinedModel(load_model(ckpt['config']['base'], device, use_ema), gen.eval(), seed=seed).eval()
     if ckpt['config'].get('arch') == 'earthformer':
         from .earthformer import EarthformerNowcaster
         model = EarthformerNowcaster()
     else:
-        model = FlowCastNet(**ckpt['config'])
+        model = FlowCastNet(**model_kwargs(ckpt['config']))
     model.load_state_dict(ckpt['ema' if use_ema else 'model'])
     return model.to(device).to(memory_format=torch.channels_last).eval()
 

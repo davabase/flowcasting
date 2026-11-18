@@ -14,6 +14,8 @@ import torch
 import torch.nn.functional as F
 
 from flowcast.data import IN_FRAMES, OUT_FRAMES, TrainWindows, ValWindows
+from flowcast.losses import LossMixer
+from flowcast.sharpness import Sharpness
 from flowcast.metrics import Scores
 from flowcast.model import FlowCastNet, warp
 
@@ -51,16 +53,21 @@ def smoothness(flow_latent):
 def validate(model, loader, device):
     model.eval()
     scores = Scores(OUT_FRAMES, pools=(1,), device=device)
+    sharp = Sharpness(OUT_FRAMES, device=device)
     for x in loader:
         x = x.to(device, non_blocking=True).float()
         with torch.autocast('cuda', dtype=torch.bfloat16):
             out = model((x[:, :IN_FRAMES] / 255).contiguous(memory_format=torch.channels_last))
-        scores.update(out['forecast'] * 255, x[:, IN_FRAMES:])
-    r = scores.result()
+        pred = (out['forecast'].float() * 255).clamp(0, 255)
+        scores.update(pred, x[:, IN_FRAMES:])
+        sharp.update(pred, x[:, IN_FRAMES:])
+    r, s = scores.result(), sharp.result()
     model.train()
     k = r['thresholds'].index(133)
     return {'val_csi_m': r['overall']['csi_m'][0], 'val_csi_133': r['overall']['csi'][0][k],
-            'val_bias_133': r['overall']['bias'][0][k], 'val_mse': r['overall']['mse']}
+            'val_csi_219': r['overall']['csi'][0][-1], 'val_bias_133': r['overall']['bias'][0][k],
+            'val_mse': r['overall']['mse'], 'val_small_power_60': s['small_scale_power'][-1],
+            'val_eff_res_60': s['effective_resolution_km'][-1]}
 
 
 def lr_at(step, args):
@@ -100,6 +107,12 @@ def main():
     parser.add_argument('--duty', type=float, default=1.0, help='Fraction of wall time spent computing (<1 throttles)')
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--no-augment', action='store_true', help='Disable rotation/flip augmentation')
+    parser.add_argument('--loss', default=None,
+                        help="Loss mix on the forecast, e.g. 'mse:1,jaccard:0.5,gan:0.3' (see flowcast/losses.py); "
+                             'the first term is the anchor, others are gradient-balanced against it. '
+                             "Default: FlowCastNet's weighted MSE+MAE")
+    parser.add_argument('--init-from', default=None, help='Start from this FlowCast checkpoint (its EMA weights)')
+    parser.add_argument('--d-lr', type=float, default=2e-4, help='Discriminator learning rate (gan term)')
     args = parser.parse_args()
     torch.set_num_threads(args.threads)
     torch.manual_seed(args.seed)
@@ -120,9 +133,17 @@ def main():
         model.config = {'arch': 'earthformer'}     # inference rebuilds it without activation checkpointing
         if args.freeze_stem:   # frozen full-resolution conv stem stores no activations for backward (3.4 -> 2.2 GB)
             model.net.initial_encoder.requires_grad_(False)
+    elif args.init_from:
+        from flowcast.predict import model_kwargs
+        model = FlowCastNet(**model_kwargs(torch.load(args.init_from, map_location='cpu', weights_only=False)['config'])).to(device)
     else:
         model = FlowCastNet(widths=[int(w) for w in args.widths.split(',')],
                             depths=[int(d) for d in args.depths.split(',')]).to(device)
+    if args.init_from:
+        init = torch.load(args.init_from, map_location=device, weights_only=False)
+        model.load_state_dict(init['ema'])
+        print(f'Initialised from {args.init_from} (EMA weights, step {init["step"]})', flush=True)
+        del init
     model = model.to(memory_format=torch.channels_last)
     ema = copy.deepcopy(model).requires_grad_(False)
     decay, no_decay = [], []
@@ -131,6 +152,7 @@ def main():
             (no_decay if p.ndim <= 1 or name.endswith('gamma') else decay).append(p)
     opt = torch.optim.AdamW([{'params': decay, 'weight_decay': args.weight_decay},
                              {'params': no_decay, 'weight_decay': 0.0}], lr=args.lr, betas=(0.9, 0.99))
+    mixer = LossMixer(args.loss, device, d_lr=args.d_lr) if args.loss else None
     step, best = 0, -1.0
     if args.resume and (run / 'last.pt').exists():
         ckpt = torch.load(run / 'last.pt', map_location=device)
@@ -138,12 +160,16 @@ def main():
         ema.load_state_dict(ckpt['ema'])
         opt.load_state_dict(ckpt['opt'])
         step, best = ckpt['step'], ckpt.get('best', -1.0)
+        if mixer is not None and ckpt.get('mixer'):
+            mixer.load_state_dict(ckpt['mixer'])
         print(f'Resumed from step {step}', flush=True)
 
     train = TrainWindows(samples_per_epoch=(args.steps - step) * args.batch, seed=step, augment=not args.no_augment)
     val = ValWindows(max_events=args.val_events)
     print(f'{sum(p.numel() for p in model.parameters()) / 1e6:.1f}M params | '
           f'{len(train.slots)} training events | {len(val)} validation windows', flush=True)
+    if args.loss:
+        model.config = {**model.config, 'loss': args.loss}
     (run / 'config.json').write_text(json.dumps({**vars(args), 'model': model.config,
                                                'gpu': torch.cuda.get_device_name(),
                                                'torch': torch.__version__}, indent=1))
@@ -157,7 +183,8 @@ def main():
     def checkpoint(name, metrics=None):
         temporary = run / (name + '.tmp')
         torch.save({'model': model.state_dict(), 'ema': ema.state_dict(), 'opt': opt.state_dict(),
-                    'step': step, 'best': best, 'config': model.config, 'metrics': metrics}, temporary)
+                    'step': step, 'best': best, 'config': model.config, 'metrics': metrics,
+                    'mixer': mixer.state_dict() if mixer is not None else None}, temporary)
         temporary.replace(run / name)
 
     model.train()
@@ -171,15 +198,27 @@ def main():
             group['lr'] = lr_at(step, args)
         with torch.autocast('cuda', dtype=torch.bfloat16):
             out = model(inputs)
-        data_loss = weighted_loss(out['forecast'], target)
         if 'flow_latent' in out:          # FlowCastNet's motion-field terms
             adv_loss = advection_loss(inputs, out, target)
             smooth_loss = smoothness(out['flow_latent'])
         else:
             adv_loss = smooth_loss = torch.zeros((), device=device)
-        loss = data_loss + args.adv * adv_loss + args.smooth * smooth_loss
         opt.zero_grad(set_to_none=True)
-        loss.backward()
+        terms = {}
+        if mixer is None:
+            data_loss = weighted_loss(out['forecast'], target)
+            (data_loss + args.adv * adv_loss + args.smooth * smooth_loss).backward()
+        else:
+            # The mixed forecast loss enters as a gradient on the output (gradient-balanced terms).
+            grad_out, terms = mixer.output_grad(inputs, out['forecast'], target, step)
+            data_loss = terms[mixer.anchor]
+            aux = args.adv * adv_loss + args.smooth * smooth_loss
+            tensors, grads = [out['forecast']], [grad_out]
+            if aux.requires_grad:
+                tensors.append(aux)
+                grads.append(torch.ones_like(aux))
+            torch.autograd.backward(tensors, grads)
+            terms.update(mixer.disc_step(inputs, out['forecast'], target))
         grad_norm = torch.nn.utils.clip_grad_norm_(model_params, 1.0)
         opt.step()
         with torch.no_grad():
@@ -187,11 +226,12 @@ def main():
         step += 1
         seen += x.shape[0]
         for k, v in (('loss', data_loss), ('adv', adv_loss), ('smooth', smooth_loss), ('grad', grad_norm),
-                     ('flow_px', out['flow_latent'][:, -1].norm(dim=1).mean() if 'flow_latent' in out else 0.0)):
+                     ('flow_px', out['flow_latent'][:, -1].norm(dim=1).mean() if 'flow_latent' in out else 0.0),
+                     *((f't_{name}', value) for name, value in terms.items())):
             running[k] = running.get(k, 0.0) + float(v.detach() if torch.is_tensor(v) else v)
         if args.duty < 1.0:
             torch.cuda.synchronize()
-            time.sleep((time.time() - start) * (1 - args.duty) / args.duty)
+            time.sleep(max(0.0, (time.time() - start) * (1 - args.duty) / args.duty))
 
         if step % args.log_every == 0:
             elapsed = time.time() - tic

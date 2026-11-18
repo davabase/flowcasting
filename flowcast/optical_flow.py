@@ -20,23 +20,40 @@ def backward_motion(frames, pairs=3):
     return np.mean(flows, axis=0)
 
 
-def extrapolate(last, motion, steps):
-    """Semi-Lagrangian advection: follow backward trajectories through a stationary motion field."""
+def extrapolate(last, motion, steps, return_valid=False):
+    """Semi-Lagrangian advection: follow backward trajectories through a stationary motion field.
+
+    With return_valid, also returns the fraction (0-1) of each pixel whose trajectory starts inside the
+    domain; outside it the forecast is filled with 0 (no data flows in across the boundary)."""
     h, w = last.shape
     x, y = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
     out = np.empty((steps, h, w), np.uint8)
+    valid = np.empty((steps, h, w), np.float32) if return_valid else None
+    ones = np.ones((h, w), np.float32)
     for k in range(steps):
         dx = cv2.remap(motion[..., 0], x, y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
         dy = cv2.remap(motion[..., 1], x, y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
         x, y = x + dx, y + dy
         out[k] = cv2.remap(last, x, y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-    return out
+        if return_valid:
+            valid[k] = cv2.remap(ones, x, y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+    return (out, valid) if return_valid else out
 
 
 def optical_flow_one(frames, steps=12):
     frames = np.ascontiguousarray(frames)
     motion = backward_motion(frames)
     return extrapolate(frames[-1], motion, steps), motion
+
+
+def optical_flow_valid(inputs, steps=12, workers=8):
+    """Like optical_flow, but returns (forecast (B, steps, H, W) uint8, valid fraction (B, steps, H, W) float32)."""
+    def one(frames):
+        frames = np.ascontiguousarray(frames)
+        return extrapolate(frames[-1], backward_motion(frames), steps, return_valid=True)
+    with concurrent.futures.ThreadPoolExecutor(workers) as pool:
+        results = list(pool.map(one, inputs))
+    return np.stack([r[0] for r in results]), np.stack([r[1] for r in results])
 
 
 def optical_flow(inputs, steps=12, workers=8):
