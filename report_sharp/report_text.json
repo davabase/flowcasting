@@ -1,0 +1,290 @@
+{
+ "text": {
+  "lede": "Our deterministic forecasts were blurry: at 60 minutes Earthformer keeps under 1% of the fine-scale detail in real radar. We tried three ways to bring it back and scored each on the official SEVIR test set: losses borrowed from medical imaging, a small GAN that paints texture on top of a frozen forecast, and real radar texture carried forward by optical flow. Alone, the segmentation losses (Jaccard, Tversky) improve skill but not sharpness, and the GAN sharpens but shrinks the heaviest storm cores. Combined, they work: with focal Tversky in both the forecaster's and the GAN's training loss, Earthformer keeps its skill (CSI-M {{ef_tvtv_refine:CSI-M:.3f}} vs {{ef_original:CSI-M:.3f}}) with {{ef_tvtv_refine:SmallPow60:pct}} of real fine-scale detail instead of {{ef_original:SmallPow60:pct}}, and FlowCastNet beats its original on every CSI and FSS score. Both pay in MSE, which punishes any misplaced detail.",
+  "cases-text": "Three comparisons on the same four test windows. <strong>Tversky + GAN refiner</strong>: each model before and after the plain GAN refiner and the Tversky-aware one. <strong>GAN refiner</strong>: the plain refiner, with two samples for Earthformer to show that every run draws a different texture. <strong>Losses and texture blend</strong>: the medical-loss fine-tunes and Earthformer with radar texture. Rows are 15, 30 and 60 minutes ahead, plus a 128 km zoom on the strongest storm at 60 minutes (dashed box). EF is Earthformer, FC is FlowCastNet. The windows are the three with the most heavy rain plus one moderate case, chosen from the observed radar only.",
+  "spec-text": "Each line divides forecast power by real-radar power at each wavelength, averaged over all 1,872 test windows. Texture as rich as real radar sits on the 100% line. The original models keep the largest scales and lose almost everything below 16 km by 60 minutes. The Tversky-aware GAN refiners recover roughly 30–60% of real power below 16 km and the texture blend nearly all of it, more smoothly than the loss-only run (the dotted Earthformer line wobbles where it draws stripes). Power alone cannot tell real texture from artifacts, which is why the images above matter. The chips switch to 15 and 30 minutes.",
+  "trade-text": "Each dot is one run: right means more fine detail, up means more skill. Dashed arrows go from each original model to its Tversky-aware GAN refiner and to the texture blend. Switch the skill score with the chips. Pixel-exact CSI-M usually drops for sharp forecasts while the neighbourhood scores (16 km CSI and FSS) rise. That gap is the double penalty: a pixel score punishes a sharp feature that is slightly misplaced twice, once where it is and once where it should have been. The Tversky-aware refiners are the exception: they keep or raise CSI-M while adding detail.",
+  "table-text": "Bold marks the best model value in each column (baselines excluded). Highlighted rows are the forecasts featured above. Compare Earthformer fine-tunes with the MSE control: fine-tuning on our data alone moves Earthformer from 0.447 to 0.412 CSI-M, whatever the loss. Refiner rows keep their base model frozen (original or focal-Tversky weights); compare them with the originals.",
+  "losses-text": "Every loss was added to a pixel anchor, with its gradient rescaled to a fixed share of the anchor's, so a weight of 1 means equal pull. Segmentation losses act on soft masks at the six SEVIR thresholds. Earthformer runs are compared with the MSE control, which had the same schedule. The last two rows are the generative refiner, a separate network rather than a loss, and its Tversky-aware version.",
+  "gan-text": "Fine-tuning with extra losses (see the loss table below) asks one deterministic network to be both accurate and sharp, and it can only output one field. A generative refiner splits the job, as NowcastNet (Zhang et al., Nature 2023), DGMR (Ravuri et al., Nature 2021) and CasCast (Gong et al., ICML 2024) do at much larger scale. The forecaster stays frozen and keeps its skill; a second, small network adds the small-scale texture, driven by random noise, so it can commit to one plausible texture instead of averaging them all. It works best at 15–30 minutes. At 60 minutes, where the future is least certain, Earthformer's refiner falls back on a repetitive blob texture; FlowCastNet's, which starts from warped real radar, stays more natural. Alone, the refiner also shrinks the heaviest cores: Earthformer's area bias at VIL ≥ 219 falls from 0.61 to 0.31, likely because its faithfulness term is a squared error on the pooled sample mean, which averages intense cores down. Starting from a focal-Tversky forecaster does not help, because the refiner repaints the cores whatever its input. Adding focal Tversky to the refiner's own loss, on the same pooled mean, does: misses of each intensity region now cost more than false alarms, so the refiner keeps the cores (bias 0.72) and still paints texture."
+ },
+ "case_labels": [
+  "Aug 30 · storm line",
+  "Aug 8 · scattered cells",
+  "Sep 28 · rain band",
+  "Nov 28 · light rain"
+ ],
+ "lists": {
+  "takeaways": [
+   "<strong>Focal Tversky inside the GAN refiner is the best combination.</strong> Focal Tversky alone improves skill but not sharpness, and the plain refiner sharpens but shrinks the heaviest cores (CSI-219 {{ef_original:CSI-219:.3f}} → {{ef_refine:CSI-219:.3f}}). A plain refiner on a focal-Tversky forecaster loses them the same way ({{ef_tv_refine:CSI-219:.3f}}). With focal Tversky in the refiner's own loss, Earthformer reaches CSI-M {{ef_tvtv_refine:CSI-M:.3f}} (original {{ef_original:CSI-M:.3f}}), CSI-219 {{ef_tvtv_refine:CSI-219:.3f}} ({{ef_original:CSI-219:.3f}}) and 16 km CSI {{ef_tvtv_refine:CSI-M-pool16:.3f}} ({{ef_original:CSI-M-pool16:.3f}}), with fine detail {{ef_tvtv_refine:SmallPow60:pct}} (from {{ef_original:SmallPow60:pct}}). FlowCastNet: CSI-M {{fc_original:CSI-M:.3f}} → {{fc_tvtv_refine:CSI-M:.3f}}, CSI-219 {{fc_original:CSI-219:.3f}} → {{fc_tvtv_refine:CSI-219:.3f}}, fine detail {{fc_original:SmallPow60:pct}} → {{fc_tvtv_refine:SmallPow60:pct}}. The price: a little less texture than the plain refiner, higher MSE than the originals, and FlowCastNet's version spreads moderate rain wider than observed (area bias 1.15 at VIL ≥ 133).",
+   "<strong>A small GAN on top of the forecast gives the most natural texture.</strong> Earthformer + GAN refiner keeps {{ef_refine:SmallPow60:pct}} of real fine-scale power (from 0.8%), raises FSS from {{ef_original:FSS133@17km:.3f}} to {{ef_refine:FSS133@17km:.3f}} and 16 km CSI from {{ef_original:CSI-M-pool16:.3f}} to {{ef_refine:CSI-M-pool16:.3f}}, at a cost of pixel-exact CSI-M ({{ef_original:CSI-M:.3f}} → {{ef_refine:CSI-M:.3f}}). On FlowCastNet: fine detail {{fc_original:SmallPow60:pct}} → {{fc_refine:SmallPow60:pct}}, FSS {{fc_original:FSS133@17km:.3f}} → {{fc_refine:FSS133@17km:.3f}}, CSI-M {{fc_original:CSI-M:.3f}} → {{fc_refine:CSI-M:.3f}}.",
+   "<strong>The noise is what makes it work.</strong> A network with no noise input can only output one field, so under uncertainty it averages (blur) or invents a fixed pattern (stripes, checkerboards). Each refiner sample commits to one texture instead, and two samples differ where the future is uncertain.",
+   "<strong>The GAN needed help to train.</strong> With a plain discriminator the generator drew a regular hatching pattern and ignored its noise. Showing the discriminator a high-passed copy of each frame, letting it train alone for 300 steps, and updating it twice per generator step fixed that.",
+   "<strong>Segmentation losses improve skill, not sharpness.</strong> Soft Jaccard and focal Tversky optimise a soft version of CSI itself and recover almost all the skill that fine-tuning cost: focal Tversky reaches CSI-M {{ef_ftversky:CSI-M:.3f}} (original {{ef_original:CSI-M:.3f}}, control {{ef_mse:CSI-M:.3f}}) and CSI-219 {{ef_ftversky:CSI-219:.3f}}, with lower MSE than the original. The maps get crisper level edges and stronger cores but stay smooth (fine detail about 1.4%). On FlowCastNet it helps more: CSI-M {{fc_original:CSI-M:.3f}} → {{fc_ftversky:CSI-M:.3f}}, CSI-219 {{fc_original:CSI-219:.3f}} → {{fc_ftversky:CSI-219:.3f}}. Boundary, Hausdorff and SSIM losses add little or nothing.",
+   "<strong>Spectrum and GAN losses sharpen only with a scale split, and leave artifacts.</strong> On top of full MSE, spectrum and GAN losses raised fine detail only 4–6×. Restricting the pixel loss to scales above 16 km let them reach 78% (Earthformer) and 32% (FlowCastNet), but Earthformer drew axis-aligned streaks and FlowCastNet a pixel checkerboard.",
+   "<strong>The texture blend keeps the most skill.</strong> Earthformer above 16 km plus optical-flow-advected radar below gives the best neighbourhood scores of any run (16 km CSI {{blend_oft:CSI-M-pool16:.3f}}, FSS {{blend_oft:FSS133@17km:.3f}}) and CSI-M {{blend_oft:CSI-M:.3f}}, with no training. It inherits optical flow's streaks at 60 minutes.",
+   "<strong>Next steps:</strong> tune the Tversky weight inside the refiner and train it longer, score it as an ensemble (several samples per window, with CRPS), or swap the GAN for a latent diffusion refiner as in CasCast and PreDiff."
+  ],
+  "limits": [
+   "Short training: 4,000 windows per Earthformer fine-tune, 20,000 per FlowCastNet fine-tune and 12,000 per refiner. GANs this young are far from converged.",
+   "Refiner scores are for a single sample per window. A generative model is better judged as an ensemble (spread, CRPS), which we have not computed.",
+   "At 60 minutes the refiner's texture becomes repetitive, and its two samples differ less than real outcomes would.",
+   "One weight per loss and one training length. The Tversky term in the refiner was run at a single weight (equal pull to the pool regularisation), so the trade between texture and skill is untuned.",
+   "The featured runs were picked after seeing test scores and images, and the Tversky-aware refiner was designed after seeing the plain refiner shrink the cores. With this many runs, score differences of about 0.005 are within selection noise.",
+   "Our validation set overlaps Earthformer's training years, so it could not rank runs reliably; selection used the test set plus visual checks.",
+   "The power-spectrum measure cannot tell realistic texture from stripes or checkerboards, so it flatters the loss-only runs.",
+   "The texture blend falls back to the smooth Earthformer field where rain enters across the frame edge."
+  ],
+  "gan-list": [
+   "<strong>Inputs:</strong> the frozen model's 12-frame forecast, the last 4 observed frames, and random noise at 1/2, 1/4 and 1/8 resolution. The output is a correction added to the forecast.",
+   "<strong>Network:</strong> a 3.3 M-parameter U-Net with bilinear upsampling (no transposed convolutions or pixel shuffles, which caused the checkerboards above).",
+   "<strong>Realism:</strong> a conditional PatchGAN discriminator (1.3 M parameters) that sees each frame both as is and high-passed, so missing or fake texture is easy for it to spot. It trains alone for the first 300 steps and twice per generator step after that.",
+   "<strong>Faithfulness:</strong> NowcastNet-style pool regularisation. Two samples are drawn per window, and the mean of their 4 km max-pooled fields must match the observation. Each sample can be sharp while the pair stays honest about where the rain is.",
+   "<strong>Tversky-aware version:</strong> the same network, plus focal Tversky (misses weighted 0.7, false alarms 0.3, at the six SEVIR thresholds) on the pooled two-sample mean, with the same pull as the pool regularisation. It is trained on top of the focal-Tversky fine-tuned forecaster.",
+   "<strong>Budget:</strong> 12,000 training windows per refiner, 45–65 minutes each on the laptop GPU at ≤85% utilisation. The scores below are for one sample per test window."
+  ]
+ },
+ "losses": [
+  {
+   "name": "MSE (control)",
+   "family": "pixel",
+   "origin": "Earthformer's own training objective.",
+   "what": "Penalises every pixel error, so under uncertainty it predicts the average of the possible futures: smooth fields and weakened peaks.",
+   "verdict": "Blurrier",
+   "verdict_kind": "warn",
+   "result": "4,000 more windows: MSE 3.64 → 3.36, but CSI-M 0.447 → 0.412 and heavy-rain bias 0.93 → 0.65."
+  },
+  {
+   "name": "Soft Jaccard (IoU)",
+   "family": "region overlap",
+   "origin": "Dice loss in V-Net (Milletari et al., 2016); IoU loss (Rahman & Wang, 2016).",
+   "what": "The Jaccard index of a thresholded field is exactly CSI, so this optimises a soft version of the score itself. It pushes values away from each threshold, which sharpens level edges.",
+   "verdict": "Better skill, not sharper",
+   "verdict_kind": "good",
+   "result": "Against the MSE control: CSI-M {{ef_mse:CSI-M:.3f}} → {{ef_jaccard:CSI-M:.3f}}, CSI-219 {{ef_mse:CSI-219:.3f}} → {{ef_jaccard:CSI-219:.3f}}, MSE {{ef_mse:MSE(1e-3):.2f}} → {{ef_jaccard:MSE(1e-3):.2f}}. Fine detail stays near 1% ({{ef_jaccard:SmallPow60:pct}})."
+  },
+  {
+   "name": "Focal Tversky",
+   "family": "region overlap",
+   "origin": "Tversky loss (Salehi et al., 2017); focal Tversky (Abraham & Khan, 2019), for small lesions.",
+   "what": "Like Jaccard, but misses cost more than false alarms (0.7 vs 0.3), aimed at under-forecast heavy cores.",
+   "verdict": "Best skill, not sharper",
+   "verdict_kind": "good",
+   "result": "Against the MSE control: CSI-M {{ef_mse:CSI-M:.3f}} → {{ef_ftversky:CSI-M:.3f}} (original {{ef_original:CSI-M:.3f}}), CSI-219 {{ef_mse:CSI-219:.3f}} → {{ef_ftversky:CSI-219:.3f}}, MSE {{ef_ftversky:MSE(1e-3):.2f}}, below the original {{ef_original:MSE(1e-3):.2f}}. Fine detail {{ef_ftversky:SmallPow60:pct}}. On FlowCastNet: CSI-M {{fc_original:CSI-M:.3f}} → {{fc_ftversky:CSI-M:.3f}}, CSI-219 {{fc_original:CSI-219:.3f}} → {{fc_ftversky:CSI-219:.3f}}."
+  },
+  {
+   "name": "Boundary loss",
+   "family": "boundary",
+   "origin": "Kervadec et al., MIDL 2019, for highly unbalanced segmentation.",
+   "what": "Integrates the forecast mask against the true storm's signed distance map, so rain placed far outside the true storm costs in proportion to the distance.",
+   "verdict": "No added value",
+   "verdict_kind": "flat",
+   "result": "Run as half Jaccard, half boundary. CSI-M {{ef_boundary:CSI-M:.3f}} (control {{ef_mse:CSI-M:.3f}}, Jaccard alone {{ef_jaccard:CSI-M:.3f}}), FSS {{ef_boundary:FSS133@17km:.3f}} (control {{ef_mse:FSS133@17km:.3f}}), fine detail {{ef_boundary:SmallPow60:pct}}. The gain comes from the Jaccard half."
+  },
+  {
+   "name": "Hausdorff loss",
+   "family": "boundary",
+   "origin": "Karimi & Salcudean, IEEE TMI 2019.",
+   "what": "Weights mask errors by their distance to the true and forecast boundaries, targeting the largest boundary displacements.",
+   "verdict": "Small gain, not sharper",
+   "verdict_kind": "flat",
+   "result": "Against the MSE control: CSI-M {{ef_mse:CSI-M:.3f}} → {{ef_hausdorff:CSI-M:.3f}}, FSS {{ef_mse:FSS133@17km:.3f}} → {{ef_hausdorff:FSS133@17km:.3f}}, 16 km CSI {{ef_mse:CSI-M-pool16:.3f}} → {{ef_hausdorff:CSI-M-pool16:.3f}}. Fine detail {{ef_hausdorff:SmallPow60:pct}}. The slowest loss to compute."
+  },
+  {
+   "name": "Multi-scale SSIM",
+   "family": "structure",
+   "origin": "Image-restoration losses (Zhao et al., 2017), common in MR and CT reconstruction.",
+   "what": "Compares local mean, contrast and structure at 1, 2 and 4 km.",
+   "verdict": "No effect",
+   "verdict_kind": "flat",
+   "result": "Every score matches the MSE control: CSI-M {{ef_ssim:CSI-M:.3f}} vs {{ef_mse:CSI-M:.3f}}, FSS {{ef_ssim:FSS133@17km:.3f}} vs {{ef_mse:FSS133@17km:.3f}}, fine detail {{ef_ssim:SmallPow60:pct}}."
+  },
+  {
+   "name": "k-space (power spectrum)",
+   "family": "frequency",
+   "origin": "k-space losses in MRI reconstruction.",
+   "what": "Matches spectral power and ignores phase, so misplaced detail is not double-penalised. The radial version averages over directions; the 2-D version checks every frequency and orientation.",
+   "verdict": "Works with a split",
+   "verdict_kind": "good",
+   "result": "On top of full MSE: fine detail 0.9% → 3.9%. With the low-pass anchor: 22% (radial, which drew stripes), 78% (2-D with GAN)."
+  },
+  {
+   "name": "Gradient difference",
+   "family": "frequency",
+   "origin": "Mathieu et al., 2016; used in CT and MR synthesis.",
+   "what": "Matches edge strength (spatial gradient magnitudes).",
+   "verdict": "Minor",
+   "verdict_kind": "flat",
+   "result": "Used alongside the radial spectrum loss; no separate effect measured."
+  },
+  {
+   "name": "Conditional PatchGAN",
+   "family": "adversarial",
+   "origin": "pix2pix (Isola et al., 2017); MR-to-CT synthesis.",
+   "what": "A discriminator judges 94 km patches of forecast against real radar, given the last four observed frames.",
+   "verdict": "Works with a split",
+   "verdict_kind": "good",
+   "result": "On top of full MSE: fine detail 0.9% → 5.2%. With the low-pass anchor: 81% for Earthformer and 32% for FlowCastNet (with k-space), neighbourhood skill up."
+  },
+  {
+   "name": "Low-pass anchor",
+   "family": "scale split (our addition)",
+   "origin": "Scale decomposition, as in classic blended nowcasting systems.",
+   "what": "Pixel loss only on scales above about 16 km, where storms are predictable an hour ahead. Smaller scales are left to the spectrum and GAN terms.",
+   "verdict": "Key ingredient",
+   "verdict_kind": "good",
+   "result": "Every run that became sharp used it. Plain low-pass MSE flattened FlowCastNet's cores (CSI-M 0.388 → 0.357); the intensity-weighted version kept them (0.385)."
+  },
+  {
+   "name": "Noise-conditioned GAN refiner",
+   "family": "generative (a network, not a loss)",
+   "origin": "Conditional GANs for MR-to-CT synthesis (pix2pix family); NowcastNet and DGMR for radar.",
+   "what": "A second small network takes the frozen forecast plus random noise and adds texture; a texture-aware discriminator and pool regularisation train it.",
+   "verdict": "Most natural texture",
+   "verdict_kind": "good",
+   "result": "Earthformer: fine detail 0.8% → {{ef_refine:SmallPow60:pct}}, FSS {{ef_original:FSS133@17km:.3f}} → {{ef_refine:FSS133@17km:.3f}}, CSI-M {{ef_original:CSI-M:.3f}} → {{ef_refine:CSI-M:.3f}}. FlowCastNet: {{fc_original:SmallPow60:pct}} → {{fc_refine:SmallPow60:pct}}, FSS {{fc_original:FSS133@17km:.3f}} → {{fc_refine:FSS133@17km:.3f}}."
+  },
+  {
+   "name": "Focal Tversky inside the refiner",
+   "family": "region overlap + generative",
+   "origin": "Our combination of the two rows above.",
+   "what": "Focal Tversky on the refiner’s pooled two-sample mean, gradient-balanced with the pool regularisation, on a focal-Tversky fine-tuned forecaster. It stops the refiner from shrinking intense cores.",
+   "verdict": "Best combination",
+   "verdict_kind": "good",
+   "result": "Earthformer: CSI-M {{ef_original:CSI-M:.3f}} → {{ef_tvtv_refine:CSI-M:.3f}}, CSI-219 {{ef_original:CSI-219:.3f}} → {{ef_tvtv_refine:CSI-219:.3f}}, fine detail {{ef_original:SmallPow60:pct}} → {{ef_tvtv_refine:SmallPow60:pct}}. FlowCastNet: CSI-M {{fc_original:CSI-M:.3f}} → {{fc_tvtv_refine:CSI-M:.3f}}, CSI-219 {{fc_original:CSI-219:.3f}} → {{fc_tvtv_refine:CSI-219:.3f}}, fine detail {{fc_original:SmallPow60:pct}} → {{fc_tvtv_refine:SmallPow60:pct}}. Without the Tversky term in the refiner, the gains vanish."
+  }
+ ],
+ "repro": "# Sharpness baselines, then every run listed in experiments/sharpen.txt (train + score on the test set)\npython evaluate.py --methods persistence,optical_flow --out results/sharp_cpu\npython sharpen_queue.py\n\n# One run by hand: sharpened FlowCastNet\npython train.py --arch flowcast --init-from runs/flowcast/best.pt --batch 4 --lr 1e-4 --warmup 200 --steps 5000 \\\n  --loss lpwmse:1,kspace:1,gan:1 --vram-gb 6.8 --duty 0.85 --run runs/sharp/fc_split_wk\n\n# Texture blend (no training)\npython evaluate.py --methods \"\" --models \"blend_oft=blend:runs/sharp/ef_original/last.pt|optical-flow\" --out results/sharp\n\n# GAN refiner on a frozen model (one per base)\npython train_refiner.py --base runs/sharp/ef_original/last.pt --steps 6000 --run runs/refine/ef_refine\npython evaluate.py --methods \"\" --models \"ef_refine=runs/refine/ef_refine/last.pt\" --out results/sharp\n\n# Focal Tversky forecaster, then a Tversky-aware GAN refiner on it (same for Earthformer)\npython train.py --arch flowcast --init-from runs/flowcast/best.pt --batch 4 --lr 1e-4 --warmup 200 --steps 5000 \\\n  --loss wmse:1,ftversky:1 --vram-gb 6.8 --duty 0.85 --run runs/sharp/fc_ftversky\npython train_refiner.py --base runs/sharp/fc_ftversky/last.pt --steps 6000 --tversky 1 --run runs/refine/fc_tvtv_refine\n\n# Figures and this page\npython sharpen_figures.py --out results/sharp/figures_tversky --models \"EF original=runs/sharp/ef_original/last.pt,EF + GAN=runs/refine/ef_refine/last.pt,EF Tversky + GAN=runs/refine/ef_tvtv_refine/last.pt,FC original=runs/sharp/fc_original/last.pt,FC + GAN=runs/refine/fc_refine/last.pt,FC Tversky + GAN=runs/refine/fc_tvtv_refine/last.pt\"\npython sharpen_figures.py --models \"EF original=runs/sharp/ef_original/last.pt,EF sharpened=runs/sharp/ef_split_k/last.pt,FC original=runs/sharp/fc_original/last.pt,FC sharpened=runs/sharp/fc_split_wk/last.pt,EF + texture=blend:runs/sharp/ef_original/last.pt|optical-flow\"\npython sharpen_figures.py --out results/sharp/figures_refiner --models \"EF original=runs/sharp/ef_original/last.pt,EF + GAN A=runs/refine/ef_refine/last.pt@0,EF + GAN B=runs/refine/ef_refine/last.pt@1,FC original=runs/sharp/fc_original/last.pt,FC + GAN=runs/refine/fc_refine/last.pt@0\"\npython build_sharp_report.py",
+ "footer": "FlowCast loss-function study · official SEVIR nowcast test set (1,872 windows, June–November 2019) · losses in flowcast/losses.py, sharpness metrics in flowcast/sharpness.py · trained on an RTX 4070 Laptop GPU at ≤85% utilisation.",
+ "highlight": {
+  "spectrum": [
+   [
+    "Optical flow",
+    "Optical flow",
+    "solid"
+   ],
+   [
+    "ef_original",
+    "Earthformer",
+    "dashed"
+   ],
+   [
+    "ef_split_k",
+    "Earthformer + losses",
+    "dotted"
+   ],
+   [
+    "ef_tvtv_refine",
+    "Earthformer + Tversky GAN",
+    "solid"
+   ],
+   [
+    "fc_original",
+    "FlowCastNet",
+    "dashed"
+   ],
+   [
+    "fc_tvtv_refine",
+    "FlowCastNet + Tversky GAN",
+    "solid"
+   ],
+   [
+    "blend_oft",
+    "Earthformer + radar texture",
+    "solid"
+   ]
+  ],
+  "arrows": [
+   [
+    "ef_original",
+    "ef_tvtv_refine",
+    "--s4"
+   ],
+   [
+    "fc_original",
+    "fc_tvtv_refine",
+    "--s1"
+   ],
+   [
+    "ef_original",
+    "blend_oft",
+    "--s5"
+   ]
+  ],
+  "picks": [
+   "ef_tvtv_refine",
+   "fc_tvtv_refine",
+   "blend_oft",
+   "ef_original",
+   "fc_original",
+   "Optical flow"
+  ],
+  "facts": [
+   [
+    "Earthformer + Tversky GAN",
+    "ef_original",
+    "ef_tvtv_refine",
+    [
+     "CSI-M",
+     "CSI-219",
+     "CSI-M-pool16"
+    ]
+   ],
+   [
+    "FlowCastNet + Tversky GAN",
+    "fc_original",
+    "fc_tvtv_refine",
+    [
+     "CSI-M",
+     "CSI-219",
+     "CSI-M-pool16"
+    ]
+   ],
+   [
+    "Earthformer + radar texture",
+    "ef_original",
+    "blend_oft"
+   ],
+   [
+    "Optical flow",
+    null,
+    "Optical flow"
+   ]
+  ]
+ },
+ "figsets": [
+  {
+   "key": "tversky",
+   "label": "Tversky + GAN refiner",
+   "dir": "results/sharp/figures_tversky",
+   "captions": [
+    "<strong>A curved line of intense cells.</strong> At 60 minutes the plain Earthformer refiner fills the rain area with a regular pattern of diagonal blobs. The Tversky-aware refiner draws grainier, less regular texture and keeps a band of intense cores along the line (zoom), as observed. FlowCastNet's Tversky-aware refiner fills in the streaks its plain refiner leaves.",
+    "<strong>Scattered convective cells.</strong> Both Tversky-aware refiners look like real radar at 15 and 30 minutes. At 60 minutes Earthformer's diagonal waves are fainter than with the plain refiner, but not gone, and FlowCastNet's version again replaces streaks with filled rain areas.",
+    "<strong>A broad rain band.</strong> The plain Earthformer refiner turns the south-east of the band into a lattice of blobs at 60 minutes. The Tversky-aware one draws irregular texture with scattered heavier cells (zoom), the closest match to the observed band. FlowCastNet's Tversky-aware refiner spreads moderate rain wider than observed, the cost of weighting misses above false alarms.",
+    "<strong>Light, widespread rain with one small heavier patch</strong> (zoom). All refiners add believable texture to the light rain, and all miss the heavier patch at 60 minutes. Earthformer's Tversky-aware refiner still shows a faint dotted pattern, weaker than the plain one's."
+   ]
+  },
+  {
+   "key": "refiner",
+   "label": "GAN refiner",
+   "dir": "results/sharp/figures_refiner",
+   "captions": [
+    "<strong>A curved line of intense cells.</strong> Both refiners keep the line and add ragged edges, granular rain and stronger cores at 15 and 30 minutes. At 60 minutes Earthformer's refiner fills the broad rain area with a regular pattern of blobs, placed differently in samples A and B; FlowCastNet's refiner gives streakier, less regular texture.",
+    "<strong>Scattered convective cells.</strong> At 15 and 30 minutes both refined forecasts look like real radar, FlowCastNet's most of all. At 60 minutes Earthformer's refiner draws diagonal waves in the south-east; FlowCastNet's stays closer to real texture.",
+    "<strong>A broad rain band.</strong> The refiners add texture everywhere, including where rain enters across the frame edge, which the optical-flow blend cannot do. Earthformer's refiner turns the 60-minute band into repeated blobs.",
+    "<strong>Light, widespread rain with one small heavier patch</strong> (zoom). The refiners add believable texture to the light rain. Like every other forecast they miss the heavier patch at 60 minutes, and Earthformer's refiner shows a faint dotted pattern there."
+   ]
+  },
+  {
+   "key": "losses",
+   "label": "Losses and texture blend",
+   "dir": "results/sharp/figures",
+   "captions": [
+    "<strong>A curved line of intense cells.</strong> The original Earthformer keeps the line but smooths it into flat bands. Its loss-sharpened version restores some cores but draws axis-aligned streaks by 60 minutes. Sharpened FlowCastNet has granular texture with a faint pixel checkerboard. Earthformer + texture keeps Earthformer's line and adds radar texture.",
+    "<strong>Scattered convective cells.</strong> At 15 and 30 minutes Earthformer + texture is hard to tell from the observation. By 60 minutes it inherits optical flow's motion streaks. Sharpened FlowCastNet shows a fine checkerboard from 30 minutes on, from its 4 × 4 pixel-shuffle output.",
+    "<strong>A broad rain band.</strong> Rain flows in across the frame edge where optical flow has no data, so Earthformer + texture falls back to the smooth Earthformer field there. The sharpened networks fill that area with invented detail instead.",
+    "<strong>Light, widespread rain with one small heavier patch</strong> (zoom). No forecast keeps the heavier patch at 60 minutes. The sharpened forecasts add texture to the light rain; the originals stay smooth."
+   ]
+  }
+ ]
+}

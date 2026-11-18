@@ -1,0 +1,37 @@
+# Loss-function study (sharpen_queue.py). name | extra train.py args. Earthformer runs fine-tune the official
+# weights for 4,000 windows; fc_ runs fine-tune FlowCastNet's best checkpoint for 20,000 windows.
+# Weights after the first term are gradient-balanced against it (see flowcast/losses.py).
+ef_original   | --loss mse:1 --steps 1 --lr 0 --warmup 1      # untouched official weights (lr 0), for reference
+fc_original   | --loss wmse:1 --steps 1 --lr 0 --warmup 1     # untouched FlowCastNet (lr 0), for reference
+ef_mse       | --loss mse:1                                   # control: Earthformer's own objective
+ef_spectral   | --loss mse:1,spectral:0.5,gdl:0.5              # k-space (power spectrum) + gradient difference
+ef_gan        | --loss mse:1,gan:0.5                           # pix2pix-style conditional PatchGAN
+# Scale-split: pixel accuracy only above ~16 km (lpmse); small scales shaped by distribution-matching terms.
+ef_split_spec | --loss lpmse:1,spectral:1,gdl:0.5
+ef_split_gan  | --loss lpmse:1,spectral:0.5,gan:1
+ef_split_k    | --loss lpmse:1,kspace:1,gan:1                 # 2-D k-space (orientation-aware) + PatchGAN
+# FlowCastNet (warps the last observed frame, full-resolution refinement): same scale-split recipes.
+fc_split_gan  | --loss lpmse:1,spectral:0.5,gan:1
+fc_split_k    | --loss lpmse:1,kspace:1,gan:1
+fc_split_wk   | --loss lpwmse:1,kspace:1,gan:1                # FlowCastNet's intensity weighting, above 16 km only
+# Scale blend (no training): Earthformer's scales above ~16 km + sharpened FlowCastNet's detail below.
+blend_k       | eval:blend:runs/sharp/ef_original/last.pt|runs/sharp/fc_split_k/last.pt
+blend_wk      | eval:blend:runs/sharp/ef_original/last.pt|runs/sharp/fc_split_wk/last.pt
+blend_of      | eval:blend:runs/sharp/ef_original/last.pt|optical-flow    # Earthformer above 16 km + advected real texture
+fc_split_wg   | --loss lpwmse:1,gan:1                         # small scales judged only by the discriminator
+blend_oft     | eval:blend:runs/sharp/ef_original/last.pt|optical-flow    # same, inflow edge filled from Earthformer
+# Generative texture refiner (noise-conditioned GAN on top of a frozen forecast; NowcastNet / CasCast style).
+ef_refine     | refine:--base runs/sharp/ef_original/last.pt --steps 6000
+fc_refine     | refine:--base runs/sharp/fc_original/last.pt --steps 6000
+ef_jaccard    | --loss mse:1,jaccard:1                         # soft Jaccard = soft CSI, 6 thresholds
+ef_ftversky   | --loss mse:1,ftversky:1                        # focal Tversky (misses cost more)
+ef_boundary   | --loss mse:1,jaccard:0.5,boundary:0.5          # Kervadec boundary loss + regional term
+ef_hausdorff  | --loss mse:1,hausdorff:1                       # Karimi distance-transform Hausdorff loss
+ef_ssim       | --loss mse:1,ssim:1                            # multi-scale SSIM
+# Focal Tversky base + generative refiner: region-loss skill underneath, GAN texture on top.
+ef_tv_refine  | refine:--base runs/sharp/ef_ftversky/last.pt --steps 6000
+fc_ftversky   | --loss wmse:1,ftversky:1                       # FlowCastNet's own loss + focal Tversky
+fc_tv_refine  | refine:--base runs/sharp/fc_ftversky/last.pt --steps 6000
+# Same, with focal Tversky also inside the refiner objective (pooled ensemble mean), so it cannot shrink the cores.
+ef_tvtv_refine | refine:--base runs/sharp/ef_ftversky/last.pt --steps 6000 --tversky 1
+fc_tvtv_refine | refine:--base runs/sharp/fc_ftversky/last.pt --steps 6000 --tversky 1
