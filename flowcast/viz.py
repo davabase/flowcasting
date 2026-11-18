@@ -10,7 +10,7 @@ from PIL import Image, ImageDraw, ImageFont
 # Encoded-VIL bins and colours following the SEVIR tutorial palette (black = no echo).
 VIL_LEVELS = [0, 16, 31, 59, 74, 100, 133, 160, 181, 219, 256]
 VIL_COLORS = ['#000000', '#4d4d4d', '#28be28', '#199619', '#0a690a', '#0a4b0a',
-              '#f5f500', '#edac00', '#f06e00', '#a00000', '#e700ff']
+              '#f5f500', '#edac00', '#f06e00', '#a00000']
 VIL_CMAP = ListedColormap(VIL_COLORS)
 VIL_NORM = BoundaryNorm(VIL_LEVELS, VIL_CMAP.N)
 _LUT = (np.array([matplotlib.colors.to_rgb(VIL_COLORS[np.searchsorted(VIL_LEVELS, v, 'right') - 1])
