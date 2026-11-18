@@ -1,0 +1,10 @@
+add_rules("mode.debug", "mode.release")
+
+target("flowcasting_cuda")
+    set_kind("shared")
+    set_languages("cxx17")
+    add_files("src/*.cu")
+    add_headerfiles("src/*.h")
+    add_cugencodes("native")
+    add_cuflags("--fmad=false")
+    add_defines("FLOWCAST_EXPORTS")

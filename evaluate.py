@@ -21,7 +21,8 @@ from flowcast.metrics import Scores, summary_row
 
 CHUNK = 4   # windows per GPU batch (inference + scoring stay well under the VRAM cap)
 NAMES = {'persistence': 'Persistence', 'optical_flow': 'Optical flow', 'flowcast': 'FlowCastNet',
-         'earthformer': 'Earthformer', 'earthformer_ft': 'Earthformer FT', 'pysteps': 'Pysteps LK'}
+         'earthformer': 'Earthformer', 'earthformer_ft': 'Earthformer FT', 'pysteps': 'Pysteps LK',
+         'optical_flow_cuda': 'Optical flow CUDA'}
 
 
 def per_sample(pred, target):
@@ -67,6 +68,10 @@ def main():
         torch.cuda.set_per_process_memory_fraction(min(1.0, 2.5e9 / torch.cuda.mem_get_info()[1]))
 
     model = None
+    cuda_flow = None
+    if 'optical_flow_cuda' in methods:
+        from flowcast.optical_flow_cuda import CudaOpticalFlow
+        cuda_flow = CudaOpticalFlow()
     for method in methods:
         if method in ('flowcast', 'earthformer', 'earthformer_ft'):
             from flowcast.predict import forecast, load_model
@@ -83,6 +88,8 @@ def main():
                 block = block[:args.limit - start]
             inputs, target = block[:, :IN_FRAMES], block[:, IN_FRAMES:]
             fc = optical_flow(inputs, config=optical_config)[0] if method == 'optical_flow' else None
+            if method == 'optical_flow_cuda':
+                fc = cuda_flow.predict(inputs, config=optical_config)[0]
             if method == 'pysteps':
                 fc = pysteps(inputs)[0]
 
@@ -91,7 +98,7 @@ def main():
                 for i in range(0, len(inputs), CHUNK):
                     if method == 'persistence':
                         yield torch.as_tensor(baselines.persistence(inputs[i:i + CHUNK]), device=device)
-                    elif method in ('optical_flow', 'pysteps'):
+                    elif method in ('optical_flow', 'optical_flow_cuda', 'pysteps'):
                         yield torch.as_tensor(fc[i:i + CHUNK], device=device)
                     else:
                         yield forecast(model, inputs[i:i + CHUNK], batch=CHUNK)[0]['forecast']
@@ -109,6 +116,8 @@ def main():
         result['elapsed_seconds'] = time.time() - started
         if method == 'optical_flow':
             result['configuration'] = configuration(optical_config)
+        if method == 'optical_flow_cuda':
+            result['configuration'] = cuda_flow.configuration(optical_config)
         if method == 'pysteps':
             from importlib.metadata import version
             result['configuration'] = {

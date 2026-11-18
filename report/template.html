@@ -55,6 +55,10 @@ a { color: var(--s1); }
 code, .mono { font-family: var(--mono); font-size: 0.88em; }
 .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
 .section { display: grid; gap: 20px; min-width: 0; align-content: start; }
+#cuda-comparison > * { min-width: 0; }
+#cuda-comparison figure { margin: 0; }
+#cuda-comparison img { display: block; width: 100%; height: auto; }
+#cuda-comparison pre { overflow-x: auto; }
 .section > header { display: grid; gap: 10px; }
 .lede { font-size: 19px; color: var(--ink-2); max-width: 62ch; }
 .note { font-size: 14px; color: var(--muted); }
@@ -198,6 +202,8 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--rule)
       <div class="chart" id="lead-chart"></div>
     </div>
   </section>
+
+  <!--__CUDA_COMPARISON__-->
 
   <section class="section" aria-labelledby="sota">
     <header>

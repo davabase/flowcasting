@@ -59,6 +59,112 @@ def read_log(run):
     return [r for r in log if 'loss' in r], [r for r in log if 'val_csi_m' in r]
 
 
+def cuda_comparison_section(res, out):
+    """Measured CUDA comparison is separate from historical model scorecards."""
+    from html import escape
+    path = res / 'cuda_comparison.json'
+    if not path.exists():
+        return ''
+    data = json.loads(path.read_text(encoding='utf-8'))
+    protocol, hardware, methods = data['protocol'], data['hardware'], data['methods']
+    names = ['Python / OpenCV', 'OpenCV DIS + CUDA', 'CUDA']
+    ref = methods[names[0]]
+    import matplotlib.pyplot as plt
+    figure_dir = out / 'figures'
+    figure_dir.mkdir(parents=True, exist_ok=True)
+    colors = ['#eb6834', '#b58b12', '#2a78d6']
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4), layout='constrained')
+    labels = ['Python', 'DIS + CUDA', 'CUDA']
+    for axis, mode, title in zip(axes[:2], ['single', 'batch'], ['Single-window latency', 'Batch computation per window']):
+        values = [methods[name][mode]['mean_ms_per_window'] for name in names]
+        bars = axis.bar(labels, values, color=colors)
+        axis.bar_label(bars, labels=[f'{v:.1f} ms' for v in values], padding=4)
+        axis.set_ylim(0, max(values)*1.2)
+        axis.set_ylabel('Warm wall time (ms, lower is better)')
+        axis.set_title(title)
+    leads = np.arange(1, protocol['leads']+1)*5
+    for name, color in zip(names, colors):
+        axes[2].plot(leads, methods[name]['metrics']['per_lead']['csi_m'][0], label=name, color=color)
+    axes[2].set(xlabel='Lead time (minutes)', ylabel='CSI-M (higher is better)', title='Matched forecast skill')
+    axes[2].legend(fontsize=8)
+    fig.savefig(figure_dir / 'cuda_performance.png', dpi=140)
+    plt.close(fig)
+    accuracy, timings, stages, latency = [], [], [], []
+    for name in names:
+        record = methods[name]
+        row = table_row(record['metrics'])
+        delta = record.get('difference_from_python', {})
+        accuracy.append('<tr><th>' + escape(name) + '</th>' + ''.join(
+            f'<td>{value:.5f}</td>' for value in (row['csi_m'], row['csi133'], row['csi219'], row['pool16'], row['mse']))
+            + f'<td>{delta.get("forecast_mae_encoded", 0):.4f}</td></tr>')
+        single, batch = record['single'], record['batch']
+        timings.append('<tr><th>' + escape(name) + '</th>' + ''.join(
+            f'<td>{value:.2f}</td>' for value in (
+                single['mean_ms_per_window'],
+                batch['mean_ms_per_window'], batch['windows_per_second'],
+                ref['single']['mean_ms_per_window']/single['mean_ms_per_window'],
+                ref['batch']['mean_ms_per_window']/batch['mean_ms_per_window'])) + '</tr>')
+        latency.append(f'<tr><th>{escape(name)}</th><td>{single["median_ms_per_window"]:.2f}</td>'
+                       f'<td>{single["p95_ms_per_window"]:.2f}</td></tr>')
+        if 'cuda_event_mean_ms' in single:
+            stage = single['cuda_event_mean_ms']
+            stages.append('<tr><th>' + escape(name) + '</th>' + ''.join(
+                f'<td>{stage[k]:.3f}</td>' for k in ('upload_ms', 'motion_ms', 'evolution_ms', 'download_ms')) + '</tr>')
+    figure = res / 'figures/cuda_comparison.png'
+    image = ''
+    if figure.exists():
+        (out / 'figures').mkdir(parents=True, exist_ok=True)
+        shutil.copy2(figure, out / 'figures/cuda_comparison.png')
+        image = '<figure><img src="figures/cuda_comparison.png" alt="Matched ground truth, Python, OpenCV DIS plus CUDA and full CUDA forecasts"><figcaption>Identical observations and targets for SEVIR test window 302.</figcaption></figure>'
+    shutil.copy2(path, out / 'cuda_comparison.json')
+    shape = ' × '.join(map(str, protocol['shape']))
+    full = protocol['quality_windows'] == protocol['official_test_windows']
+    coverage = ('all ' if full else 'a fixed subset of ') + f'{protocol["quality_windows"]:,}'
+    return f'''<section class="section" aria-labelledby="cuda-title" id="cuda-comparison">
+<header><h2 id="cuda-title">Python and CUDA optical flow</h2>
+<p>Fresh paired evaluation on {coverage} official test windows at {shape} pixels, with
+{protocol['input_frames']} observations and {protocol['leads']} forecast leads. All modes use the selected
+multi-gap configuration. CUDA runs on {escape(hardware['gpu'])}.</p></header>
+<p>The full CUDA path runs image pyramids, dense inverse search, refinement, confidence weighting, trajectory alignment,
+motion fusion, growth, Gaussian filtering and advection on the GPU. Its parallel propagation and refinement differ
+from OpenCV DIS, so forecasts are measured separately. The OpenCV DIS + CUDA control retains CPU pair-motion
+estimation and moves the remaining pipeline to the GPU.</p>
+<div class="table-wrap"><table><thead><tr><th>Implementation</th><th>CSI-M ↑</th><th>CSI ≥ 133 ↑</th>
+<th>CSI ≥ 219 ↑</th><th>Pool16 ↑</th><th>MSE ×10⁻³ ↓</th><th>MAE vs Python (encoded)</th></tr></thead>
+<tbody>{''.join(accuracy)}</tbody></table></div>
+<h3>Computation time, including CPU/GPU transfers</h3>
+<p>Warm timings repeat {len(protocol['timing_indices'])} fixed, evenly spaced test windows {protocol['repeats']} times.
+Inputs start in NumPy; forecast and motion finish in NumPy. Disk I/O, scoring, compilation and initial context setup are
+excluded. Each CUDA call synchronizes before the wall clock stops. Python uses {protocol['cpu_workers']} workers and
+one OpenCV thread per worker. Batch throughput uses {protocol['batch']} windows per call; CUDA currently processes
+those windows sequentially while solving their motion pairs and pixels in parallel.</p>
+<div class="table-wrap"><table><thead><tr><th>Implementation</th><th>Single mean ms</th>
+<th>Batch mean ms/window</th><th>Batch windows/s</th><th>Single speedup ×</th><th>Batch speedup ×</th>
+</tr></thead><tbody>{''.join(timings)}</tbody></table></div>
+<details><summary>GPU stage times and measurement provenance</summary>
+<div class="table-wrap"><table><thead><tr><th>Implementation</th><th>Single median ms</th><th>Single p95 ms</th>
+</tr></thead><tbody>{''.join(latency)}</tbody></table></div>
+<p>CUDA-event means for the single-window runs, in milliseconds. The control's CPU DIS time is included in wall
+time above and is outside these GPU events. Event intervals include stream idle gaps between host launches.
+Context and workspace initialization are excluded from the warm comparison; their observed times are in the JSON.</p>
+<div class="table-wrap"><table><thead><tr><th>Implementation</th><th>Upload</th><th>GPU motion</th>
+<th>GPU evolution/advection</th><th>Download</th></tr></thead><tbody>{''.join(stages)}</tbody></table></div>
+<p>{escape(hardware['cpu'])}; {hardware['logical_cpus']} logical CPUs; OpenCV {escape(hardware['opencv'])};
+CUDA runtime {hardware['cuda_runtime']}. Recorded {escape(data['created_utc'])}.</p>
+<p>Quality input/target SHA-256: <code>{protocol['quality_input_target_sha256']}</code>.
+Raw timings, exact indices, configurations, source hashes, initialization measurements and per-lead metrics:
+<a href="cuda_comparison.json">download measured results</a>. Timings are local observations under desktop load,
+not portable hardware guarantees.</p></details>
+<figure><img src="figures/cuda_performance.png" alt="Measured single-window and batch computation times, and matched CSI-M by lead time"></figure>
+{image}
+<pre>cd flowcasting_cuda
+xmake f -m release --vs=2022
+xmake
+cd ..
+.\\.venv\\Scripts\\python.exe benchmark_optical_flow_cuda.py
+.\\.venv\\Scripts\\python.exe build_report.py</pre></section>'''
+
+
 def baseline_report(res, metrics):
     """Build a measured comparison when trained-model artifacts are unavailable."""
     from html import escape
@@ -80,6 +186,7 @@ def baseline_report(res, metrics):
     for method, row in rows.items():
         table += f'<tr><th>{escape(method)}</th>' + ''.join(f'<td>{row[k]:.4f}</td>' for k in keys) + '</tr>'
     config = escape(json.dumps(metrics.get('Pysteps LK', {}).get('configuration', {}), indent=2))
+    cuda_section = cuda_comparison_section(res, out)
     optical_config = escape(json.dumps(metrics.get('Optical flow', {}).get('configuration', {}), indent=2))
     comparison = ''
     if 'Pysteps LK' in rows and 'Optical flow' in rows:
@@ -128,6 +235,7 @@ before division. Pool4/16 use max pooling. MSE and MAE use VIL divided by 255. H
 {showcase}
 <p>ML model comparisons are pending: this checkout has no saved model checkpoints or prior evaluation outputs.
 Published scores are not substituted for local measurements.</p>
+{cuda_section}
 <h2>Reproduce</h2><pre>python evaluate.py --methods persistence,optical_flow,pysteps --device cpu
 python build_report.py</pre>
 <h2>Pysteps configuration</h2><pre>{config}</pre>
@@ -415,7 +523,9 @@ def main():
         shutil.copy(RES / 'figures' / f, OUT / 'figures' / f)
     template = Path('report/template.html').read_text(encoding='utf-8')
     payload = json.dumps(data, ensure_ascii=False).replace('<', '\\u003c')
-    (OUT / 'index.html').write_text(template.replace('/*__DATA__*/', payload), encoding='utf-8')
+    html = template.replace('/*__DATA__*/', payload).replace(
+        '<!--__CUDA_COMPARISON__-->', cuda_comparison_section(RES, OUT))
+    (OUT / 'index.html').write_text(html, encoding='utf-8')
     print('Wrote', (OUT / 'index.html').resolve())
 
 

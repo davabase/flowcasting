@@ -70,6 +70,11 @@ Evaluation records the resolved configuration; figures reuse those settings. Opt
 use `--optical-flow-config PATH.json`; the selected preset is `configs/optical_flow_v3.json`.
 See [implementation and measured comparison](report/optical_flow.md) for selection, results and limitations.
 
+The [native CUDA implementation](flowcasting_cuda/README.md) moves motion estimation and the forecast
+pipeline onto the GPU. Build it with xmake, then run `benchmark_optical_flow_cuda.py` and
+`build_report.py` for matched Python/CUDA accuracy, transfer-inclusive runtime and forecast figures.
+The parallel GPU motion solver is evaluated separately from the OpenCV implementation.
+
 `Pysteps LK` uses pysteps 1.21.5 Lucas–Kanade motion on the last four observations
 (the same three recent frame pairs as DIS), followed by deterministic semi-Lagrangian
 extrapolation for all 12 leads. Linear interpolation, one midpoint iteration, zero
