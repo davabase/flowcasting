@@ -365,14 +365,23 @@ def main():
     labels = ['Storm A', 'Storm B', 'Storm C', 'Moderate']
     for n, c in enumerate(cases):
         meta = test_meta.iloc[c['index']]
-        scores = ' · '.join(f'{m} {c["csi74"][m]:.2f}' for m in methods if m in c['csi74'])
-        cases_out.append({
+        case_methods = list(methods)
+        if c.get('cuda_visuals'):
+            case_methods.insert(case_methods.index('Optical flow') + 1, 'Optical flow CUDA')
+        scores = ' · '.join(f'{m} {c["csi74"][m]:.2f}' for m in case_methods if m in c['csi74'])
+        location = (f'<strong>Test window #{c["index"]}</strong> · {meta.time_utc} UTC · '
+                    f'{meta.llcrnrlat:.1f}–{meta.urcrnrlat:.1f}°N, {abs(meta.urcrnrlon):.1f}–{abs(meta.llcrnrlon):.1f}°W')
+        case = {
             'index': c['index'], 'label': labels[n] if n < len(labels) else f'Case {n}',
             'gif': f'figures/case{n}.gif', 'png': f'figures/case{n}.png',
-            'caption': (f'<strong>Test window #{c["index"]}</strong> · {meta.time_utc} UTC · '
-                        f'{meta.llcrnrlat:.1f}–{meta.urcrnrlat:.1f}°N, {abs(meta.urcrnrlon):.1f}–{abs(meta.llcrnrlon):.1f}°W · '
-                        f'CSI ≥ 74 on this window: {scores}'),
-        })
+            'caption': f'{location} · CSI ≥ 74 on this window: {scores}',
+            'visual_methods': c.get('visual_methods', case_methods),
+        }
+        if c.get('cuda_visuals'):
+            case.update(cuda_gif=f'figures/case{n}_cuda.gif', cuda_png=f'figures/case{n}_cuda.png',
+                        cuda_caption=f'{location} · CSI ≥ 74: Python {c["csi74"]["Optical flow"]:.2f}'
+                                     f' · CUDA {c["csi74"]["Optical flow CUDA"]:.2f}')
+        cases_out.append(case)
 
     ef_list = [
         '<strong>Cuboid attention.</strong> The 13 input frames are encoded as one space-time block. Attention runs inside '
@@ -519,7 +528,10 @@ def main():
     data = report_labels(data)
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / 'figures').mkdir(exist_ok=True)
-    for f in ['anatomy.png'] + (['rollout.gif'] if rollout else []) + [f'case{n}.{e}' for n in range(len(cases)) for e in ('gif', 'png')]:
+    case_figures = [f'case{n}{suffix}.{ext}' for n, c in enumerate(cases)
+                    for suffix in (('', '_cuda') if c.get('cuda_visuals') else ('',))
+                    for ext in ('gif', 'png')]
+    for f in ['anatomy.png'] + (['rollout.gif'] if rollout else []) + case_figures:
         shutil.copy(RES / 'figures' / f, OUT / 'figures' / f)
     template = Path('report/template.html').read_text(encoding='utf-8')
     payload = json.dumps(data, ensure_ascii=False).replace('<', '\\u003c')

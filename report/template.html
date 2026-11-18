@@ -80,6 +80,7 @@ code, .mono { font-family: var(--mono); font-size: 0.88em; }
 .plate .caption { font-size: 13.5px; color: var(--plate-muted); max-width: none; }
 .plate .caption strong { color: var(--plate-ink); font-weight: 500; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+#case-methods[hidden] { display: none; }
 .chip { font: 500 13px/1 var(--mono); padding: 8px 11px; border-radius: 999px; cursor: pointer;
   border: 1px solid var(--rule); background: var(--surface); color: var(--ink-2); }
 .chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
@@ -154,6 +155,10 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--rule)
     <div class="plate">
       <div class="bar">
         <div class="chips" role="group" aria-label="Test case" id="case-chips"></div>
+        <div class="chips" role="group" aria-label="Forecast methods" id="case-methods" hidden>
+          <button class="chip" type="button" id="methods-all" aria-pressed="true">All methods</button>
+          <button class="chip" type="button" id="methods-cuda" aria-pressed="false">Python vs CUDA</button>
+        </div>
         <div class="chips" role="group" aria-label="View">
           <button class="chip" type="button" id="view-anim" aria-pressed="true">Animation</button>
           <button class="chip" type="button" id="view-frames" aria-pressed="false">Key frames</button>
@@ -352,14 +357,21 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--rule)
     `<span style="left:${(t + 0.5) / 256 * 100}%">${t}</span>`).join('');
 
   /* ---------- case viewer ---------- */
-  let caseIdx = 0, view = 'anim';
+  let caseIdx = 0, view = 'anim', methodView = 'all';
   const showCase = () => {
     const c = D.cases[caseIdx];
     const img = $('case-img');
-    img.src = view === 'anim' ? c.gif : c.png;
-    img.alt = `Test case ${c.index}: ground truth beside each method's forecast ` +
+    const hasCuda = Boolean(c.cuda_gif && c.cuda_png);
+    if (!hasCuda) methodView = 'all';
+    const focused = methodView === 'cuda';
+    img.src = focused ? (view === 'anim' ? c.cuda_gif : c.cuda_png) : (view === 'anim' ? c.gif : c.png);
+    img.alt = `Test case ${c.index}: ground truth beside ` +
+      (focused ? 'Python and CUDA optical flow forecasts ' : (c.visual_methods || METHODS).join(', ') + ' forecasts ') +
       (view === 'anim' ? 'animated over 2 hours.' : 'at 5, 15, 30, 45 and 60 minutes.');
-    $('case-caption').innerHTML = c.caption;
+    $('case-caption').innerHTML = focused ? c.cuda_caption : c.caption;
+    $('case-methods').hidden = !hasCuda;
+    $('methods-all').setAttribute('aria-pressed', !focused);
+    $('methods-cuda').setAttribute('aria-pressed', focused);
     document.querySelectorAll('#case-chips .chip').forEach((b, i) => b.setAttribute('aria-pressed', i === caseIdx));
     $('view-anim').setAttribute('aria-pressed', view === 'anim');
     $('view-frames').setAttribute('aria-pressed', view === 'frames');
@@ -368,6 +380,8 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--rule)
   $('case-chips').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { caseIdx = +b.dataset.i; showCase(); } });
   $('view-anim').addEventListener('click', () => { view = 'anim'; showCase(); });
   $('view-frames').addEventListener('click', () => { view = 'frames'; showCase(); });
+  $('methods-all').addEventListener('click', () => { methodView = 'all'; showCase(); });
+  $('methods-cuda').addEventListener('click', () => { methodView = 'cuda'; showCase(); });
   showCase();
 
   /* ---------- legends ---------- */

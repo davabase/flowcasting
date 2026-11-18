@@ -96,6 +96,12 @@ The [recorded full-test comparison](../report/optical_flow_cuda.md) summarizes t
 machine's measured accuracy and timings. The generated HTML report includes the detailed tables,
 lead-time curves and matched forecast image.
 
+Run `make_figures.py --cuda --models "Earthformer=earthformer-pretrained,Earthformer FT=runs/earthformer_ft/best.pt,FlowCastNet=runs/flowcast/best.pt"`
+before rebuilding the report to put CUDA beside Python in all four storm showcases. The viewer's
+**Python vs CUDA** option shows ground truth and the two implementations in larger panels, with
+both animations and key frames. CUDA views are included automatically when comparison results
+exist; `--no-cuda` generates the CPU/model views without loading the CUDA library.
+
 For a short smoke run:
 
 ```powershell

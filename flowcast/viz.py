@@ -23,7 +23,9 @@ PLATE_INK = '#e6e9ee'
 
 
 def method_label(name):
-    return {'Optical flow': 'FlowCast Optical Flow', 'Pysteps LK': 'pySTEPS LK'}.get(name, name)
+    return {'Optical flow': 'FlowCast Optical Flow', 'Pysteps LK': 'pySTEPS LK',
+            'Optical flow Python': 'Optical flow (Python)',
+            'Optical flow CUDA': 'Optical flow (CUDA)'}.get(name, name)
 
 
 def colorize(frame):

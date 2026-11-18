@@ -136,6 +136,8 @@ def main():
     parser.add_argument('--models', default='FlowCastNet=runs/flowcast/best.pt',
                         help='Comma-separated name=checkpoint pairs to show in the case figures')
     parser.add_argument('--results', default='results')
+    parser.add_argument('--cuda', action=argparse.BooleanOptionalAction, default=None,
+                        help='Include CUDA storm views (default: when CUDA comparison results exist)')
     args = parser.parse_args()
     res = Path(args.results)
     fig_dir = res / 'figures'
@@ -144,6 +146,14 @@ def main():
 
     metrics = json.loads((res / 'metrics.json').read_text())
     optical_config = config_from_result(metrics.get('Optical flow', {}))
+    cuda_results = res / 'cuda_comparison.json'
+    include_cuda = cuda_results.exists() if args.cuda is None else args.cuda
+    cuda_predictor = None
+    if include_cuda:
+        from flowcast.optical_flow_cuda import CudaOpticalFlow
+        cuda_predictor = CudaOpticalFlow()
+        cuda_config = (config_from_result(json.loads(cuda_results.read_text(encoding='utf-8'))['methods']['CUDA'])
+                       if cuda_results.exists() else optical_config)
     viz.lead_time_curves(fig_dir / 'lead_curves.png', metrics)
     training_curves(fig_dir / 'training.png', Path(args.checkpoint).parent / 'log.jsonl')
     per_sample = {n: np.load(res / f'per_sample_{k}.npz') for n, k in PER_SAMPLE.items()
@@ -165,7 +175,12 @@ def main():
             rows[name] = np.clip(np.rint(out['forecast'][0].cpu().numpy()), 0, 255).astype(np.uint8)
             if n == 0 and name == 'FlowCastNet':
                 anatomy(fig_dir / 'anatomy.png', inputs[0], truth[0], out)
-        rows['Optical flow'] = optical_flow(inputs, config=optical_config)[0][0]
+        python_prediction = optical_flow(inputs, config=optical_config)[0][0]
+        rows['Optical flow Python'] = python_prediction
+        cuda_prediction = None
+        if cuda_predictor is not None:
+            cuda_prediction = cuda_predictor.predict(inputs, config=cuda_config)[0][0]
+            rows['Optical flow CUDA'] = cuda_prediction
         if 'Pysteps LK' in metrics:
             rows['Pysteps LK'] = pysteps(inputs)[0][0]
         rows['Persistence'] = np.repeat(inputs[0, -1:], 12, 0)
@@ -175,8 +190,18 @@ def main():
         animated = {k: v for k, v in rows.items() if k != 'Persistence'}
         viz.comparison_gif(fig_dir / f'case{n}.gif', inputs[0], animated, scale=0.6 if len(animated) <= 4 else 0.5,
                            title=title)
+        scores = {k: float(v['csi74'][idx]) for k, v in per_sample.items()}
+        if cuda_prediction is not None:
+            focused = {'Ground truth': truth[0], 'Optical flow Python': python_prediction,
+                       'Optical flow CUDA': cuda_prediction}
+            viz.forecast_grid(fig_dir / f'case{n}_cuda.png', inputs[0], focused, title=title)
+            viz.comparison_gif(fig_dir / f'case{n}_cuda.gif', inputs[0], focused, scale=0.75, title=title)
+            predicted, observed = cuda_prediction >= 74, truth[0] >= 74
+            scores['Optical flow CUDA'] = float(np.count_nonzero(predicted & observed) /
+                                               max(np.count_nonzero(predicted | observed), 1))
         case_info.append({'index': idx, 'time_utc': when, 'id': meta.id[idx],
-                          'csi74': {k: float(v['csi74'][idx]) for k, v in per_sample.items()}})
+                          'csi74': scores, 'visual_methods': list(rows),
+                          'cuda_visuals': cuda_prediction is not None})
         print(f'case {n}: test #{idx} ({when})', flush=True)
 
     rollout_path = res / 'rollout_metrics.json'
@@ -193,6 +218,8 @@ def main():
         viz.forecast_grid(fig_dir / 'rollout.png', s['inputs'], rows, leads=(6, 12, 18, 24, 30, 36),
                           title=f'3-hour simulation · {label}')
     (res / 'cases.json').write_text(json.dumps(case_info, indent=1))
+    if cuda_predictor is not None:
+        cuda_predictor.close()
     print('Figures written to', fig_dir.resolve())
 
 
