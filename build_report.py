@@ -63,7 +63,7 @@ def baseline_report(res, metrics):
     """Build a measured comparison when trained-model artifacts are unavailable."""
     from html import escape
     from flowcast import baselines, viz
-    from flowcast.optical_flow import optical_flow
+    from flowcast.optical_flow import config_from_result, optical_flow
     from flowcast.pysteps import pysteps
     from flowcast.data import IN_FRAMES, read_test_samples
     from flowcast.metrics import summary_row
@@ -80,6 +80,7 @@ def baseline_report(res, metrics):
     for method, row in rows.items():
         table += f'<tr><th>{escape(method)}</th>' + ''.join(f'<td>{row[k]:.4f}</td>' for k in keys) + '</tr>'
     config = escape(json.dumps(metrics.get('Pysteps LK', {}).get('configuration', {}), indent=2))
+    optical_config = escape(json.dumps(metrics.get('Optical flow', {}).get('configuration', {}), indent=2))
     comparison = ''
     if 'Pysteps LK' in rows and 'Optical flow' in rows:
         delta = rows['Pysteps LK']['CSI-M'] - rows['Optical flow']['CSI-M']
@@ -96,7 +97,8 @@ def baseline_report(res, metrics):
         fields = {'Ground truth': truth[0]}
         for name, method in [('Pysteps LK', pysteps), ('Optical flow', optical_flow)]:
             if name in metrics:
-                fields[name] = method(inputs)[0][0]
+                settings = {'config': config_from_result(metrics[name])} if name.startswith('Optical flow') else {}
+                fields[name] = method(inputs, **settings)[0][0]
         if 'Persistence' in metrics:
             fields['Persistence'] = baselines.persistence(inputs)[0]
         viz.forecast_grid(out / 'comparison.png', inputs[0], fields,
@@ -112,9 +114,10 @@ img{{width:100%}}pre{{background:#f2f4f6;padding:20px;overflow:auto}}.table{{ove
 <p>All methods scored on the same {next(iter(counts)):,} official SEVIR test windows, in dataset order.
 Each window supplies 13 observed VIL frames and 12 target frames at 5-minute intervals on the original 384 × 384 grid.</p>
 <p>Pysteps uses Lucas–Kanade motion from the last four observations (three consecutive pairs), followed by
-deterministic semi-Lagrangian extrapolation. DIS uses the existing three-pair average and OpenCV advection.
-Persistence repeats the last observation. Both flow methods receive the same recent context and fill incoming
-areas outside the image with zero. Forecasts are rounded to uint8 before scoring.</p>
+deterministic semi-Lagrangian extrapolation with zero outside the image. FlowCast Optical Flow uses OpenCV DIS
+motion and semi-Lagrangian advection with configurable alignment, reliability weighting, smoothing, damped
+growth/decay and scale-dependent detail persistence. Its exact settings, including boundary handling, are recorded
+below. Persistence repeats the last observation. Forecasts are rounded to uint8 before scoring.</p>
 <p>Inputs remain encoded VIL (0–255); no rain-rate conversion, logarithmic transform, stochastic STEPS ensemble,
 or parameter tuning on the test set is used. This measures optical flow extrapolation on this benchmark.</p>
 <div class="table"><table>{table}</table></div>
@@ -128,6 +131,7 @@ Published scores are not substituted for local measurements.</p>
 <h2>Reproduce</h2><pre>python evaluate.py --methods persistence,optical_flow,pysteps --device cpu
 python build_report.py</pre>
 <h2>Pysteps configuration</h2><pre>{config}</pre>
+<h2>FlowCast Optical Flow configuration</h2><pre>{optical_config}</pre>
 <p>References: <a href="https://pysteps.readthedocs.io/en/stable/auto_examples/plot_optical_flow.html">Pysteps optical flow</a>;
 <a href="https://pysteps.readthedocs.io/en/stable/generated/pysteps.extrapolation.semilagrangian.extrapolate.html">extrapolation API</a>.
 Full per-lead metrics and per-window scores are saved beside this report in the results directory.</p></html>'''
@@ -318,8 +322,10 @@ def main():
         f'GPU: {config.get("gpu", "not recorded")}; PyTorch {config.get("torch", "not recorded")}. '
         f'bf16 with a per-process VRAM cap. FlowCastNet peaked at '
         f'{max(r["peak_vram_gb"] for r in train_rows):.1f} GB at about {sps:.0f} windows per second.',
-        'FlowCast Optical Flow (our in-house model): OpenCV DIS flow averaged over the last three frame pairs, then semi-Lagrangian '
-        'extrapolation (the same idea as operational systems such as pySTEPS).',
+        'FlowCast Optical Flow (our in-house model): OpenCV DIS motion with semi-Lagrangian extrapolation. '
+        + ('Recorded configuration: ' + json.dumps(metrics['Optical flow']['configuration'])
+           if 'configuration' in metrics['Optical flow'] else
+           'These historical scores predate configuration recording; reevaluate to record exact settings.'),
     ]
     if 'Pysteps LK' in metrics:
         train_list.append('pySTEPS LK (external optical flow baseline): four recent VIL frames, Lucas–Kanade motion, deterministic semi-Lagrangian '

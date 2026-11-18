@@ -1,0 +1,37 @@
+{
+  "implementation": "FlowCast Optical Flow",
+  "version": 3,
+  "opencv_version": "5.0.0",
+  "parameters": {
+    "pairs": 3,
+    "motion_gaps": [
+      2,
+      3,
+      6
+    ],
+    "integration": "euler",
+    "align_motion": true,
+    "confidence_weighting": true,
+    "recency_decay": 0.75,
+    "smooth_motion": true,
+    "smoothing_sigma": 3.0,
+    "photometric_scale": 15.0,
+    "consistency_scale": 1.5,
+    "growth_decay": true,
+    "growth_sigma": 2.0,
+    "growth_cap": 3.0,
+    "growth_lifetime": 3.0,
+    "multiscale": true,
+    "scale_sigmas": [
+      2.0,
+      8.0
+    ],
+    "scale_lifetimes": [
+      36.0,
+      108.0
+    ],
+    "boundary": "edge"
+  },
+  "input_scale": "encoded SEVIR VIL 0-255",
+  "output": "rounded uint8"
+}

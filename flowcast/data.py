@@ -1,5 +1,6 @@
 """SEVIR VIL datasets: random training windows from raw events and the official test set."""
 from pathlib import Path
+import threading
 
 import h5py
 import numpy as np
@@ -43,8 +44,15 @@ class _EventArray:
     _offset = None
     directory = TRAIN_DIR
     FRAME = 384 * 384
+    # A shared seek/read pair must be atomic when experiments use threads.
+    # Keep the lock on the class so DataLoader instances remain pickleable.
+    _read_lock = threading.Lock()
 
     def read(self, slot, start, frames):
+        with self._read_lock:
+            return self._read_locked(slot, start, frames)
+
+    def _read_locked(self, slot, start, frames):
         if self._file is None:
             header = np.load(Path(self.directory) / 'events.npy', mmap_mode='r')
             self._offset = header.offset
@@ -52,7 +60,9 @@ class _EventArray:
             self._file = open(Path(self.directory) / 'events.npy', 'rb', buffering=0)
         out = np.empty((frames, 384, 384), np.uint8)
         self._file.seek(self._offset + (int(slot) * 49 + int(start)) * self.FRAME)
-        self._file.readinto(memoryview(out).cast('B'))
+        count = self._file.readinto(memoryview(out).cast('B'))
+        if count != out.nbytes:
+            raise EOFError(f'Incomplete SEVIR event read: {count} of {out.nbytes} bytes')
         return out
 
     def __getstate__(self):

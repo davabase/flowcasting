@@ -11,9 +11,10 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import cv2
 
 from flowcast import baselines
-from flowcast.optical_flow import optical_flow
+from flowcast.optical_flow import configuration, load_config, optical_flow
 from flowcast.pysteps import pysteps
 from flowcast.data import IN_FRAMES, OUT_FRAMES, iter_test_blocks
 from flowcast.metrics import Scores, summary_row
@@ -46,14 +47,17 @@ def main():
     parser.add_argument('--out', default='results')
     parser.add_argument('--limit', type=int, default=None, help='Score only the first N test windows')
     parser.add_argument('--chunk', type=int, default=CHUNK, help='Windows per GPU batch')
+    parser.add_argument('--optical-flow-config', help='JSON overrides for FlowCast Optical Flow')
     args = parser.parse_args()
     CHUNK = args.chunk
+    optical_config = load_config(args.optical_flow_config)
     methods = args.methods.split(',')
     if any(m not in NAMES for m in methods):
         parser.error(f'Methods must be chosen from {list(NAMES)}')
     if args.chunk < 1 or args.threads < 1 or (args.limit is not None and args.limit < 1):
         parser.error('--chunk, --threads and --limit must be positive')
     torch.set_num_threads(args.threads)
+    cv2.setNumThreads(1)  # Optical flow already parallelizes independent windows.
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = out_dir / 'metrics.json'
@@ -78,7 +82,7 @@ def main():
             if args.limit is not None:
                 block = block[:args.limit - start]
             inputs, target = block[:, :IN_FRAMES], block[:, IN_FRAMES:]
-            fc = optical_flow(inputs)[0] if method == 'optical_flow' else None
+            fc = optical_flow(inputs, config=optical_config)[0] if method == 'optical_flow' else None
             if method == 'pysteps':
                 fc = pysteps(inputs)[0]
 
@@ -103,6 +107,8 @@ def main():
         result = scores.result()
         result['windows'] = count
         result['elapsed_seconds'] = time.time() - started
+        if method == 'optical_flow':
+            result['configuration'] = configuration(optical_config)
         if method == 'pysteps':
             from importlib.metadata import version
             result['configuration'] = {

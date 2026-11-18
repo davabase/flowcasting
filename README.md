@@ -55,6 +55,21 @@ for a separate smoke run, so partial metrics do not replace full-test results.
 
 The full-test results and method details are recorded in [report/pysteps.md](report/pysteps.md).
 
+## FlowCast Optical Flow
+
+Our deterministic predictor combines OpenCV DIS motion over 10-, 15- and 30-minute gaps,
+aligns recent estimates, weights reliable motion, and advects damped growth and multiscale detail.
+It uses encoded VIL with no trained weights. The external pySTEPS LK baseline remains unchanged.
+
+```powershell
+.\.venv\Scripts\python.exe evaluate.py --methods persistence,optical_flow,pysteps --device cpu
+.\.venv\Scripts\python.exe build_report.py
+```
+
+Evaluation records the resolved configuration; figures reuse those settings. Optional JSON overrides
+use `--optical-flow-config PATH.json`; the selected preset is `configs/optical_flow_v3.json`.
+See [implementation and measured comparison](report/optical_flow.md) for selection, results and limitations.
+
 `Pysteps LK` uses pysteps 1.21.5 Lucas–Kanade motion on the last four observations
 (the same three recent frame pairs as DIS), followed by deterministic semi-Lagrangian
 extrapolation for all 12 leads. Linear interpolation, one midpoint iteration, zero

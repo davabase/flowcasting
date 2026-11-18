@@ -67,8 +67,10 @@ def comparison_gif(path, inputs, rows, step_minutes=5, scale=0.5, title=None):
             x0 = pad + j * (tw + pad)
             frame = inputs[k] if observed else rows[name][k - inputs.shape[0]]
             canvas.paste(tile(frame), (x0, header + label_h))
-            draw.text((x0, header + 4), method_label(name) if not observed else ('Observed' if j == 0 else ''),
-                      fill=(235, 235, 235), font=font)
+            label = method_label(name) if not observed else ('Observed' if j == 0 else '')
+            width = draw.textlength(label, font=font)
+            label_font = _font(max(9, int(15 * tw / width))) if width > tw else font
+            draw.text((x0, header + 4), label, fill=(235, 235, 235), font=label_font)
         stamp = f'observed  t{minutes:+d} min' if observed else f'forecast  t+{minutes} min'
         draw.text((pad, header + label_h + th + 4), stamp,
                   fill=(150, 200, 255) if observed else (255, 190, 120), font=small)

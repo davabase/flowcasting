@@ -17,7 +17,7 @@ import numpy as np
 import torch
 
 from flowcast import baselines
-from flowcast.optical_flow import optical_flow
+from flowcast.optical_flow import configuration, load_config, optical_flow
 from flowcast.data import IN_FRAMES, ROOT, load_manifest, read_event
 from flowcast.metrics import Scores
 from flowcast.predict import load_model, rollout
@@ -31,7 +31,9 @@ def main():
     parser.add_argument('--out', default='results')
     parser.add_argument('--steps', type=int, default=36)
     parser.add_argument('--batch', type=int, default=2, help='Windows per GPU forward pass')
+    parser.add_argument('--optical-flow-config', help='JSON overrides for FlowCast Optical Flow')
     args = parser.parse_args()
+    optical_config = load_config(args.optical_flow_config)
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     device = 'cuda'
@@ -49,7 +51,7 @@ def main():
         x = np.stack([read_event(s, args.events) for s in rows.slot])
         inputs, truth = x[:, :IN_FRAMES], x[:, IN_FRAMES:IN_FRAMES + args.steps]
         preds = {n: rollout(m, inputs, args.steps, batch=args.batch) for n, m in models.items()}
-        preds['Optical flow'] = optical_flow(inputs, args.steps)[0]
+        preds['Optical flow'] = optical_flow(inputs, args.steps, config=optical_config)[0]
         preds['Persistence'] = baselines.persistence(inputs, args.steps)
         target = torch.as_tensor(truth, device=device).float()
         for n in names:
@@ -63,6 +65,7 @@ def main():
                         **{n: np.clip(np.rint(preds[n][j]), 0, 255).astype(np.uint8) for n in names}}
         print(f'{min(i + 4, len(events))}/{len(events)} events', flush=True)
     results = {n: {**s.result(), 'events': len(events), 'event_store': Path(args.events).name} for n, s in scores.items()}
+    results['Optical flow']['configuration'] = configuration(optical_config)
     (out_dir / 'rollout_metrics.json').write_text(json.dumps(results, indent=1))
     np.savez_compressed(out_dir / 'rollout_showcase.npz', names=np.array(names),
                         **{k.replace(' ', '_'): v for k, v in showcase.items()})

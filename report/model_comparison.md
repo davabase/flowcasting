@@ -1,6 +1,6 @@
 # Neural model comparison
 
-Completed 2026-11-08 (America/Los_Angeles). All six methods use the same 1,872 official SEVIR test windows, original 384 × 384 grid, 13 input frames, 12 target frames, and shared metrics.
+Updated 2026-11-09 (America/Los_Angeles). All methods use the same 1,872 official SEVIR test windows, original 384 × 384 grid, 13 input frames, 12 target frames, and shared metrics.
 
 | Method | CSI-M ↑ | CSI ≥ 133 ↑ | MSE ×10⁻³ ↓ |
 |---|---:|---:|---:|
@@ -8,7 +8,7 @@ Completed 2026-11-08 (America/Los_Angeles). All six methods use the same 1,872 o
 | Earthformer FT | 0.4279 | 0.4311 | 3.8308 |
 | FlowCastNet | 0.3966 | 0.4002 | 4.5777 |
 | pySTEPS LK | 0.3507 | 0.3178 | 7.1347 |
-| FlowCast Optical Flow | 0.3495 | 0.3128 | 7.1907 |
+| FlowCast Optical Flow | 0.3834 | 0.3512 | 5.7554 |
 | Persistence | 0.2654 | 0.2253 | 11.3346 |
 
 Pretrained Earthformer has the highest CSI-M. FlowCastNet improves over FlowCast Optical Flow and the pySTEPS LK baseline. Fine-tuning Earthformer does not improve test CSI-M in this run: 0.4279 versus 0.4469 for the pretrained weights.
@@ -22,7 +22,7 @@ FlowCastNet and FlowCast Optical Flow are our in-house models. FlowCast Optical 
 - 5,146 clean training events and 155 held-out validation events. Each validation check uses the first 60 validation events (180 fixed windows). Event IDs were checked to be disjoint from the official test set.
 - Seed 42, bf16, NVIDIA GeForce RTX 5060 Ti, PyTorch 2.15.0+cu132. Training was interrupted on November 4 and resumed from optimizer/EMA checkpoints on November 8; resumed sampling is not an exact replay of an uninterrupted run.
 
-Earthformer includes external pretraining, so this comparison does not isolate architecture from training data and compute. These are single-run point estimates without confidence intervals. The classical baselines were evaluated on November 4; the models on November 8.
+Earthformer includes external pretraining, so this comparison does not isolate architecture from training data and compute. These are single-run point estimates without confidence intervals. FlowCast Optical Flow was reevaluated on November 9 with version 3 multi-gap motion fusion, after separate validation discovery and confirmation. Persistence and pySTEPS were evaluated on November 4; neural models on November 8. See [optical flow details](optical_flow.md) for validation results and configuration.
 
 ## Artifacts and reproduction
 

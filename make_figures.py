@@ -13,7 +13,7 @@ import pandas as pd
 import torch
 
 from flowcast import baselines, viz
-from flowcast.optical_flow import optical_flow
+from flowcast.optical_flow import config_from_result, optical_flow
 from flowcast.pysteps import pysteps
 from flowcast.data import IN_FRAMES, ROOT, read_test_samples
 from flowcast.predict import forecast, load_model
@@ -143,6 +143,7 @@ def main():
     torch.cuda.set_per_process_memory_fraction(min(1.0, 2.0e9 / torch.cuda.mem_get_info()[1]))
 
     metrics = json.loads((res / 'metrics.json').read_text())
+    optical_config = config_from_result(metrics.get('Optical flow', {}))
     viz.lead_time_curves(fig_dir / 'lead_curves.png', metrics)
     training_curves(fig_dir / 'training.png', Path(args.checkpoint).parent / 'log.jsonl')
     per_sample = {n: np.load(res / f'per_sample_{k}.npz') for n, k in PER_SAMPLE.items()
@@ -164,7 +165,7 @@ def main():
             rows[name] = np.clip(np.rint(out['forecast'][0].cpu().numpy()), 0, 255).astype(np.uint8)
             if n == 0 and name == 'FlowCastNet':
                 anatomy(fig_dir / 'anatomy.png', inputs[0], truth[0], out)
-        rows['Optical flow'] = optical_flow(inputs)[0][0]
+        rows['Optical flow'] = optical_flow(inputs, config=optical_config)[0][0]
         if 'Pysteps LK' in metrics:
             rows['Pysteps LK'] = pysteps(inputs)[0][0]
         rows['Persistence'] = np.repeat(inputs[0, -1:], 12, 0)

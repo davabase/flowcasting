@@ -72,7 +72,7 @@ def main():
         try:
             resume('flowcast')
             resume('earthformer_ft')
-            execute('evaluate', ['evaluate.py', '--methods', 'flowcast,earthformer,earthformer_ft', '--chunk', '1'])
+            execute('evaluate', ['evaluate.py', '--methods', 'optical_flow,flowcast,earthformer,earthformer_ft', '--chunk', '1'])
             execute('figures', ['make_figures.py', '--models',
                                'Earthformer=earthformer-pretrained,Earthformer FT=runs/earthformer_ft/best.pt,'
                                'FlowCastNet=runs/flowcast/best.pt'])
