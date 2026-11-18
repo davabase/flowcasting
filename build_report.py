@@ -67,14 +67,15 @@ def cuda_comparison_section(res, out):
         return ''
     data = json.loads(path.read_text(encoding='utf-8'))
     protocol, hardware, methods = data['protocol'], data['hardware'], data['methods']
-    names = ['Python / OpenCV', 'OpenCV DIS + CUDA', 'CUDA']
+    names = ['Python / OpenCV', 'CUDA']
+    display_names = {'Python / OpenCV': 'CPU (Python / OpenCV)', 'CUDA': 'CUDA'}
     ref = methods[names[0]]
     import matplotlib.pyplot as plt
     figure_dir = out / 'figures'
     figure_dir.mkdir(parents=True, exist_ok=True)
-    colors = ['#eb6834', '#b58b12', '#2a78d6']
+    colors = ['#eb6834', '#2a78d6']
     fig, axes = plt.subplots(1, 3, figsize=(14, 4), layout='constrained')
-    labels = ['Python', 'DIS + CUDA', 'CUDA']
+    labels = ['CPU', 'CUDA']
     for axis, mode, title in zip(axes[:2], ['single', 'batch'], ['Single-window latency', 'Batch computation per window']):
         values = [methods[name][mode]['mean_ms_per_window'] for name in names]
         bars = axis.bar(labels, values, color=colors)
@@ -84,7 +85,7 @@ def cuda_comparison_section(res, out):
         axis.set_title(title)
     leads = np.arange(1, protocol['leads']+1)*5
     for name, color in zip(names, colors):
-        axes[2].plot(leads, methods[name]['metrics']['per_lead']['csi_m'][0], label=name, color=color)
+        axes[2].plot(leads, methods[name]['metrics']['per_lead']['csi_m'][0], label=display_names[name], color=color)
     axes[2].set(xlabel='Lead time (minutes)', ylabel='CSI-M (higher is better)', title='Matched forecast skill')
     axes[2].legend(fontsize=8)
     fig.savefig(figure_dir / 'cuda_performance.png', dpi=140)
@@ -92,43 +93,44 @@ def cuda_comparison_section(res, out):
     accuracy, timings, stages, latency = [], [], [], []
     for name in names:
         record = methods[name]
+        label = display_names[name]
         row = table_row(record['metrics'])
         delta = record.get('difference_from_python', {})
-        accuracy.append('<tr><th>' + escape(name) + '</th>' + ''.join(
+        accuracy.append('<tr><th>' + escape(label) + '</th>' + ''.join(
             f'<td>{value:.5f}</td>' for value in (row['csi_m'], row['csi133'], row['csi219'], row['pool16'], row['mse']))
             + f'<td>{delta.get("forecast_mae_encoded", 0):.4f}</td></tr>')
         single, batch = record['single'], record['batch']
-        timings.append('<tr><th>' + escape(name) + '</th>' + ''.join(
+        timings.append('<tr><th>' + escape(label) + '</th>' + ''.join(
             f'<td>{value:.2f}</td>' for value in (
                 single['mean_ms_per_window'],
                 batch['mean_ms_per_window'], batch['windows_per_second'],
                 ref['single']['mean_ms_per_window']/single['mean_ms_per_window'],
                 ref['batch']['mean_ms_per_window']/batch['mean_ms_per_window'])) + '</tr>')
-        latency.append(f'<tr><th>{escape(name)}</th><td>{single["median_ms_per_window"]:.2f}</td>'
+        latency.append(f'<tr><th>{escape(label)}</th><td>{single["median_ms_per_window"]:.2f}</td>'
                        f'<td>{single["p95_ms_per_window"]:.2f}</td></tr>')
         if 'cuda_event_mean_ms' in single:
             stage = single['cuda_event_mean_ms']
-            stages.append('<tr><th>' + escape(name) + '</th>' + ''.join(
+            stages.append('<tr><th>' + escape(label) + '</th>' + ''.join(
                 f'<td>{stage[k]:.3f}</td>' for k in ('upload_ms', 'motion_ms', 'evolution_ms', 'download_ms')) + '</tr>')
     figure = res / 'figures/cuda_comparison.png'
     image = ''
     if figure.exists():
         (out / 'figures').mkdir(parents=True, exist_ok=True)
         shutil.copy2(figure, out / 'figures/cuda_comparison.png')
-        image = '<figure><img src="figures/cuda_comparison.png" alt="Matched ground truth, Python, OpenCV DIS plus CUDA and full CUDA forecasts"><figcaption>Identical observations and targets for SEVIR test window 302.</figcaption></figure>'
-    shutil.copy2(path, out / 'cuda_comparison.json')
+        image = '<figure><img src="figures/cuda_comparison.png" alt="Matched ground truth, CPU and CUDA forecasts"><figcaption>Identical observations and targets for SEVIR test window 302.</figcaption></figure>'
+    data['methods'] = {name: methods[name] for name in names}
+    (out / 'cuda_comparison.json').write_text(json.dumps(data, indent=2), encoding='utf-8')
     shape = ' × '.join(map(str, protocol['shape']))
     full = protocol['quality_windows'] == protocol['official_test_windows']
     coverage = ('all ' if full else 'a fixed subset of ') + f'{protocol["quality_windows"]:,}'
     return f'''<section class="section" aria-labelledby="cuda-title" id="cuda-comparison">
-<header><h2 id="cuda-title">Python and CUDA optical flow</h2>
+<header><h2 id="cuda-title">CPU vs CUDA optical flow</h2>
 <p>Fresh paired evaluation on {coverage} official test windows at {shape} pixels, with
 {protocol['input_frames']} observations and {protocol['leads']} forecast leads. All modes use the selected
 multi-gap configuration. CUDA runs on {escape(hardware['gpu'])}.</p></header>
 <p>The full CUDA path runs image pyramids, dense inverse search, refinement, confidence weighting, trajectory alignment,
 motion fusion, growth, Gaussian filtering and advection on the GPU. Its parallel propagation and refinement differ
-from OpenCV DIS, so forecasts are measured separately. The OpenCV DIS + CUDA control retains CPU pair-motion
-estimation and moves the remaining pipeline to the GPU.</p>
+from the CPU implementation's OpenCV DIS, so forecasts are measured separately.</p>
 <div class="table-wrap"><table><thead><tr><th>Implementation</th><th>CSI-M ↑</th><th>CSI ≥ 133 ↑</th>
 <th>CSI ≥ 219 ↑</th><th>Pool16 ↑</th><th>MSE ×10⁻³ ↓</th><th>MAE vs Python (encoded)</th></tr></thead>
 <tbody>{''.join(accuracy)}</tbody></table></div>
@@ -144,8 +146,7 @@ those windows sequentially while solving their motion pairs and pixels in parall
 <details><summary>GPU stage times and measurement provenance</summary>
 <div class="table-wrap"><table><thead><tr><th>Implementation</th><th>Single median ms</th><th>Single p95 ms</th>
 </tr></thead><tbody>{''.join(latency)}</tbody></table></div>
-<p>CUDA-event means for the single-window runs, in milliseconds. The control's CPU DIS time is included in wall
-time above and is outside these GPU events. Event intervals include stream idle gaps between host launches.
+<p>CUDA-event means for the single-window runs, in milliseconds. Event intervals include stream idle gaps between host launches.
 Context and workspace initialization are excluded from the warm comparison; their observed times are in the JSON.</p>
 <div class="table-wrap"><table><thead><tr><th>Implementation</th><th>Upload</th><th>GPU motion</th>
 <th>GPU evolution/advection</th><th>Download</th></tr></thead><tbody>{''.join(stages)}</tbody></table></div>

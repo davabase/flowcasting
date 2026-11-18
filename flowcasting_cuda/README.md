@@ -46,14 +46,14 @@ context manager to release the workspace. A missing library/GPU raises an error.
 
 ## What runs on the GPU
 
-| Stage | Full CUDA | OpenCV DIS + CUDA control |
+| Stage | CPU | CUDA |
 |---|---|---|
-| Area image pyramids, Sobel gradients | CUDA | OpenCV CPU for DIS; CUDA for confidence |
-| Multi-gap backward/forward pair motion | CUDA inverse search and refinement | Original OpenCV DIS medium on CPU |
-| Confidence, residuals, history alignment | CUDA | CUDA |
-| Reliability smoothing, masked trend medians, gap fusion | CUDA | CUDA |
-| Gaussian/Laplacian bands, damped growth | CUDA | CUDA |
-| Euler/midpoint trajectories, remapping, uint8 output | CUDA | CUDA |
+| Area image pyramids, Sobel gradients | OpenCV | CUDA kernels |
+| Multi-gap backward/forward pair motion | OpenCV DIS medium | CUDA inverse search and refinement |
+| Confidence, residuals, history alignment | NumPy / OpenCV | CUDA kernels |
+| Reliability smoothing, masked trend medians, gap fusion | NumPy / OpenCV | CUDA kernels |
+| Gaussian/Laplacian bands, damped growth | NumPy / OpenCV | CUDA kernels |
+| Euler/midpoint trajectories, remapping, uint8 output | NumPy / OpenCV | CUDA kernels |
 
 The motion solver follows the DIS structure: 8×8 patches, stride 3, mean-normalized inverse
 compositional search, coarse-to-fine initialization, residual-weighted densification, and
@@ -67,13 +67,7 @@ bitwise DIS port. Its accuracy must be measured separately.
 Postprocessing preserves the reference's 1/32-pixel OpenCV remap coordinates, reflect-101
 Sobel boundaries, replicated Gaussian boundaries, gap normalization, masked medians,
 confidence fallbacks, and ties-to-even output rounding. Floating-point reductions and
-interpolation boundaries can still create output differences. The control mode isolates
-these from differences in estimated pair motion:
-
-```python
-with CudaOpticalFlow(motion_backend='opencv') as control:
-    prediction, motion = control.predict(inputs)
-```
+interpolation boundaries can still create output differences.
 
 ## Reproduce the comparison
 
@@ -82,7 +76,7 @@ with CudaOpticalFlow(motion_backend='opencv') as control:
 .\.venv\Scripts\python.exe build_report.py
 ```
 
-The default run recomputes all three methods on the same 1,872 official test windows. It
+The default run recomputes both implementations on the same 1,872 official test windows. It
 then measures single-window latency and eight-window throughput on 32 fixed, evenly spaced
 test windows, with three repeats. Warm wall time starts with NumPy observations and ends
 with NumPy forecasts and motion; transfer and synchronization costs are included. Disk reads,

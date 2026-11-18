@@ -56,11 +56,11 @@ def main():
     timing_ids = np.linspace(0, total-1, min(total, args.timing_windows), dtype=int).tolist()
     methods = {}
     creation = {}
-    for name, backend in [('CUDA', 'cuda'), ('OpenCV DIS + CUDA', 'opencv')]:
+    for name, backend in [('CUDA', 'cuda')]:
         started = time.perf_counter()
         methods[name] = CudaOpticalFlow(motion_backend=backend)
         creation[name] = (time.perf_counter()-started)*1000
-    names = ['Python / OpenCV', 'OpenCV DIS + CUDA', 'CUDA']
+    names = ['Python / OpenCV', 'CUDA']
 
     def predict(name, inputs):
         if name == 'Python / OpenCV':
@@ -192,7 +192,7 @@ def main():
         rows[name] = predict(name,example[:,:IN_FRAMES])[0][0]
     (out/'figures').mkdir(exist_ok=True)
     viz.forecast_grid(out/'figures/cuda_comparison.png',example[0,:IN_FRAMES],rows,
-                      title='SEVIR test #302: Python and CUDA on the same observations')
+                      title='SEVIR test #302: CPU and CUDA on the same observations')
     for method in methods.values():
         method.close()
 
